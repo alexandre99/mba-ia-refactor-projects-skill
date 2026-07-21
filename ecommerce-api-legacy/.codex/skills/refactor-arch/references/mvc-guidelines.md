@@ -1,19 +1,39 @@
 # MVC Target Guidelines
 
-MVC is the assignment vocabulary, but boundaries must remain testable.
+## Conceptual boundaries
 
-- **Routes/Views:** declare endpoints, parse transport input, call controllers and map HTTP responses.
-- **Controllers:** orchestrate one use case; no raw SQL, schema bootstrap or external provider implementation.
-- **Models:** represent domain/data structures and local invariants; avoid framework request/response objects.
-- **Services:** own workflows spanning multiple models, repositories or side effects.
-- **Repositories/Data access:** own SQL, ORM queries and persistence mapping.
-- **Configuration/composition root:** load environment, create dependencies, register routes and start the app.
-- **Error middleware:** map known application errors to stable HTTP contracts.
+### Routes / Views
 
-Rules:
+Declare HTTP paths and methods, parse transport-level inputs, invoke a controller, and serialize the response. No SQL and no business workflow.
 
-1. Preserve good existing boundaries.
-2. Prefer dependency injection over hidden globals.
-3. Keep public route contracts stable unless a documented security fix requires a deliberate change.
-4. Do not replace a god class with a fat controller or active-record god model.
-5. Refactor incrementally and validate after each boundary change.
+### Controllers
+
+Coordinate one use case and translate expected application outcomes into transport outcomes. Controllers should be thin and independently testable.
+
+### Models
+
+Represent domain/data concepts and enforce local invariants. Do not let a single model module become the home of unrelated use cases and all queries.
+
+### Services
+
+Own business workflows that span multiple models, repositories, transactions, or external effects.
+
+### Repositories
+
+Own database queries and persistence mapping. Parameterize values and make transaction ownership explicit.
+
+### Composition root
+
+Build the application, load configuration, initialize extensions, and connect routes. Importing modules should not unexpectedly start servers or mutate persistent data.
+
+## Flask target
+
+Prefer an application factory, blueprints, extensions module, domain-oriented controllers/services/repositories, and configuration from environment. Keep compatibility with existing routes.
+
+## Express target
+
+Prefer a small `app` construction module, routers, controllers, services, repositories, middleware, and a separate server entrypoint. Inject or explicitly construct dependencies in one composition root.
+
+## Incremental rule
+
+Do not reorganize a partially layered project merely to match a folder diagram. Preserve useful boundaries and fix responsibility leaks. The quality of dependencies matters more than folder count.
