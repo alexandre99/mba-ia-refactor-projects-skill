@@ -1,72 +1,60 @@
 # Refatoração Arquitetural Automatizada com OpenAI Codex
 
-Projeto acadêmico para criação e validação da Custom Skill `refactor-arch`. A skill analisa uma codebase, audita anti-patterns, pausa para revisão humana, refatora para uma arquitetura MVC adequada ao contexto e valida que a aplicação continua funcionando.
+Projeto acadêmico para criação e validação da Custom Skill `refactor-arch`. A entrega só será considerada concluída quando a mesma skill executar as três fases nos três projetos, produzir os relatórios, modificar o código após aprovação humana e registrar validação real de boot e endpoints.
 
 ## Ferramenta escolhida
 
 - OpenAI Codex
 - Skill path: `.codex/skills/refactor-arch/`
-- Referências da skill: Markdown
-- Projetos-alvo: Python/Flask, Node.js/Express e Python/Flask com organização parcial
+- Referências: Markdown
+- Projetos-alvo: Python/Flask, Node.js/Express e Python/Flask parcialmente organizado
 
 ## Análise Manual
 
-A análise foi realizada antes da refatoração. Os relatórios completos, com evidências e recomendações, estão em `reports/`.
+Esta seção foi produzida antes da execução da skill, como exige o enunciado. Ela funciona como referência de avaliação: a skill deve encontrar independentemente pelo menos cinco problemas em cada projeto e redescobrir parte relevante destes achados.
 
 ### Projeto 1 — `code-smells-project`
 
-Stack: Python, Flask e SQLite. Domínio: e-commerce com produtos, usuários, pedidos e relatórios.
-
-| Severidade | Problema | Evidência | Por que é relevante |
+| Severidade | Problema | Evidência | Relevância |
 |---|---|---|---|
-| CRITICAL | Endpoint de execução arbitrária de SQL | `app.py:61-80` | Permite leitura, alteração ou destruição completa do banco por uma requisição não autenticada. |
-| CRITICAL | SQL Injection por concatenação | `models.py:45-63`, `107-131`, `287-301` | Valores controlados pelo cliente são concatenados diretamente em queries. |
-| HIGH | God module com múltiplos domínios | `models.py:1-316` | Produtos, usuários, autenticação, pedidos, estoque, relatórios e SQL estão acoplados no mesmo módulo. |
-| MEDIUM | Queries N+1 ao carregar pedidos | `models.py:173-235` | Cada pedido busca itens e cada item busca novamente o produto. |
-| MEDIUM | Validação duplicada | `controllers.py:26-98` | Regras de produto se repetem entre criação e atualização e podem divergir. |
-| MEDIUM | Tratamento amplo de exceções | `controllers.py:7-294` | Erros internos são expostos ao cliente e não existe contrato centralizado. |
-| LOW | Magic values em regras de negócio | `controllers.py:54-56`, `models.py:258-264` | Categorias e faixas de desconto ficam difíceis de descobrir e alterar. |
-| LOW | Logging com `print` | `controllers.py:10-13`, `210-212` | Não há nível, contexto ou estrutura adequada para observabilidade. |
-
-Relatório: `reports/audit-project-1.md`.
+| CRITICAL | Endpoint de execução arbitrária de SQL | `app.py:61-80` | Permite leitura, alteração ou destruição do banco por uma requisição não autenticada. |
+| CRITICAL | SQL Injection por concatenação | `models.py:45-63`, `107-131`, `287-301` | Valores do cliente são concatenados diretamente em queries. |
+| HIGH | God module com múltiplos domínios | `models.py:1-316` | Produtos, usuários, autenticação, pedidos, estoque e relatórios estão acoplados. |
+| MEDIUM | Queries N+1 em pedidos | `models.py:173-235` | Cada pedido busca itens e cada item busca novamente o produto. |
+| MEDIUM | Validação duplicada | `controllers.py:26-98` | Regras de produto se repetem em criação e atualização. |
+| MEDIUM | Tratamento amplo de exceções | `controllers.py:7-294` | Erros internos são expostos e não existe política centralizada. |
+| LOW | Magic values | `controllers.py:54-56`, `models.py:258-264` | Categorias e faixas de desconto estão espalhadas. |
+| LOW | Logging com `print` | `controllers.py:10-13`, `210-212` | Não há logging estruturado. |
 
 ### Projeto 2 — `ecommerce-api-legacy`
 
-Stack: Node.js, Express e SQLite. Domínio: LMS com checkout, matrícula, pagamento e relatório financeiro.
-
-| Severidade | Problema | Evidência | Por que é relevante |
+| Severidade | Problema | Evidência | Relevância |
 |---|---|---|---|
-| CRITICAL | Credenciais e chave de pagamento hardcoded | `src/utils.js:1-8` | Segredos ficam expostos no código-fonte e em qualquer cópia do repositório. |
-| CRITICAL | Dados de cartão e chave do gateway em logs | `src/AppManager.js:45-50` | Expõe dados financeiros sensíveis e credenciais operacionais. |
-| HIGH | God Class `AppManager` | `src/AppManager.js:6-143` | A mesma classe cria banco, registra rotas, executa checkout, gera relatórios e deleta usuários. |
-| MEDIUM | Checkout sem transação | `src/AppManager.js:45-65` | Falhas intermediárias podem deixar matrícula, pagamento e auditoria inconsistentes. |
-| MEDIUM | N+1 no relatório financeiro | `src/AppManager.js:82-130` | Cada curso busca matrículas e cada matrícula busca usuário e pagamento. |
-| MEDIUM | Callback pyramid e erros inconsistentes | `src/AppManager.js:39-79`, `85-130` | O fluxo assíncrono é difícil de testar e alguns erros são ignorados. |
-| LOW | Variáveis crípticas | `src/AppManager.js:30-35` | Nomes como `u`, `e`, `p`, `cid` e `cc` escondem significado de domínio. |
-| LOW | Estado global mutável | `src/utils.js:11-17` | Cache global cria acoplamento oculto e vazamento entre testes/processos. |
-
-Relatório: `reports/audit-project-2.md`.
+| CRITICAL | Credenciais e chave de pagamento hardcoded | `src/utils.js:1-8` | Segredos ficam expostos no código-fonte. |
+| CRITICAL | Cartão e chave do gateway em logs | `src/AppManager.js:45-50` | Expõe dados financeiros sensíveis. |
+| HIGH | God Class `AppManager` | `src/AppManager.js:6-143` | A mesma classe cria banco, registra rotas, faz checkout e gera relatórios. |
+| MEDIUM | Checkout sem transação | `src/AppManager.js:45-65` | Falhas parciais podem deixar dados inconsistentes. |
+| MEDIUM | N+1 no relatório financeiro | `src/AppManager.js:82-130` | Cursos, matrículas, usuários e pagamentos são carregados em cascata. |
+| MEDIUM | Callback pyramid e erros inconsistentes | `src/AppManager.js:39-79`, `85-130` | O fluxo é difícil de testar e alguns erros são ignorados. |
+| LOW | Variáveis crípticas | `src/AppManager.js:30-35` | Nomes como `u`, `e`, `p`, `cid` e `cc` escondem o domínio. |
+| LOW | Estado global mutável | `src/utils.js:11-17` | Cria acoplamento oculto e vazamento entre testes. |
 
 ### Projeto 3 — `task-manager-api`
 
-Stack: Python, Flask, Flask-SQLAlchemy e SQLite. Domínio: usuários, tarefas, categorias e relatórios.
-
-| Severidade | Problema | Evidência | Por que é relevante |
+| Severidade | Problema | Evidência | Relevância |
 |---|---|---|---|
-| CRITICAL | Token de autenticação previsível | `routes/user_routes.py:187-213` | O token `fake-jwt-token-<id>` pode ser forjado sem assinatura, expiração ou verificação. |
+| CRITICAL | Token previsível | `routes/user_routes.py:187-213` | `fake-jwt-token-<id>` pode ser forjado. |
 | HIGH | Secret hardcoded e debug habilitado | `app.py:13-16`, `35-36` | Configuração insegura pode chegar a ambientes não locais. |
-| HIGH | Rotas continuam concentrando negócio e persistência | `routes/task_routes.py:13-301`, `routes/user_routes.py:12-213` | A separação existente é apenas parcial; os blueprints ainda são fat controllers. |
-| MEDIUM | N+1 na listagem de tarefas | `routes/task_routes.py:13-61` | Cada tarefa pode disparar consultas separadas de usuário e categoria. |
-| MEDIUM | API legada/deprecated do SQLAlchemy | `routes/task_routes.py:44`, `53`, `69`; `routes/user_routes.py:31`, `96` | `Model.query.get()` deve migrar para `Session.get()` no SQLAlchemy 2.x. |
-| MEDIUM | Serialização e cálculo de atraso duplicados | `routes/task_routes.py:18-61`, `67-83`; `routes/user_routes.py:155-185` | A mesma regra é reimplementada em rotas diferentes. |
+| HIGH | Fat controllers | `routes/task_routes.py:13-301`, `routes/user_routes.py:12-213` | Rotas ainda concentram negócio, persistência e serialização. |
+| MEDIUM | N+1 na listagem de tarefas | `routes/task_routes.py:13-61` | Cada tarefa pode consultar usuário e categoria separadamente. |
+| MEDIUM | API legada do SQLAlchemy | `routes/task_routes.py:44`, `53`, `69`; `routes/user_routes.py:31`, `96` | `Model.query.get()` deve ser avaliado contra a versão instalada e migrado quando aplicável. |
+| MEDIUM | Serialização e atraso duplicados | `routes/task_routes.py:18-61`, `67-83`; `routes/user_routes.py:155-185` | A mesma regra aparece em rotas diferentes. |
 | LOW | Imports não utilizados | `app.py:9`, `routes/task_routes.py:8-9` | Aumentam ruído e escondem dependências reais. |
-| LOW | Políticas como magic literals | `routes/task_routes.py:112-116`, `178-185`; `routes/user_routes.py:73-74` | Status, prioridade e roles podem divergir entre fluxos. |
-
-Relatório: `reports/audit-project-3.md`.
+| LOW | Magic literals | `routes/task_routes.py:112-116`, `178-185`; `routes/user_routes.py:73-74` | Status, prioridade e roles podem divergir. |
 
 ## Construção da Skill
 
-A skill foi estruturada como um orquestrador pequeno em `SKILL.md` e referências especializadas:
+A skill usa um `SKILL.md` como orquestrador e seis referências especializadas:
 
 ```text
 .codex/skills/refactor-arch/
@@ -82,103 +70,86 @@ A skill foi estruturada como um orquestrador pequeno em `SKILL.md` e referência
 
 ### Decisões de design
 
-1. **Três fases sequenciais:** análise, auditoria e refatoração.
-2. **Gate humano obrigatório:** a Fase 2 termina pedindo confirmação e nenhum arquivo da aplicação pode ser alterado antes da aprovação.
-3. **Evidência verificável:** todo finding deve possuir arquivo e linhas exatas.
-4. **Agnosticismo de tecnologia:** os sinais de detecção descrevem responsabilidades e dependências, não nomes específicos de frameworks.
-5. **MVC pragmático:** routes/views cuidam do transporte HTTP, controllers orquestram, services concentram workflows, models representam dados/invariantes e repositories isolam persistência.
-6. **Refatoração incremental:** projetos parcialmente organizados devem preservar boas fronteiras em vez de sofrer uma reescrita forçada.
-7. **Validação honesta:** boot e endpoints precisam ser realmente executados; ausência de runtime ou dependências deve ser registrada como bloqueio.
+1. Três fases sequenciais: análise, auditoria e refatoração.
+2. Nenhum arquivo da aplicação pode ser alterado nas Fases 1 e 2.
+3. A Fase 2 exige confirmação humana explícita na mesma sessão.
+4. A skill não pode copiar os findings desta análise manual; a comparação ocorre somente depois do relatório independente.
+5. Todo finding exige severidade, regra, arquivo, linhas, evidência, impacto e recomendação.
+6. O alvo é MVC pragmático: routes/views tratam HTTP, controllers orquestram, services executam workflows, models representam dados e repositories isolam persistência.
+7. Projetos parcialmente organizados devem preservar fronteiras úteis, evitando reescrita artificial.
+8. Boot e endpoints precisam ser realmente executados; ausência de runtime é bloqueio, não sucesso.
+9. Cada execução produz um relatório de auditoria e um arquivo de evidências com comandos, resultados e desvios contratuais.
 
-### Catálogo de anti-patterns
+O catálogo contém mais de oito anti-patterns com severidades distribuídas, incluindo execução arbitrária, segredos hardcoded, password handling inseguro, God Class, fat controllers, N+1, duplicação, exceções genéricas e APIs deprecated. O playbook contém mais de oito transformações com exemplos antes/depois.
 
-O catálogo possui severidades distribuídas e cobre, entre outros:
+## Protocolo de Execução e Validação
 
-- arbitrary SQL/command execution;
-- hardcoded secrets;
-- plaintext ou weak password handling;
-- God Class/God Module;
-- fat controllers;
-- ausência de transação;
-- estado global mutável;
-- N+1 queries;
-- duplicação de validação;
-- broad exception handling;
-- APIs deprecated;
-- magic values e nomenclatura ruim.
+Cada projeto deve ser executado em uma branch limpa contendo código legado e a skill, mas sem relatórios ou refatorações previamente produzidos.
 
-### Playbook de refatoração
+Para cada projeto:
 
-O playbook contém transformações concretas antes/depois para parametrização de SQL, extração de configuração, password hashing, separação de controllers/services/repositories, transações, remoção de estado global, eliminação de N+1, validação centralizada, error handling e migração de APIs deprecated.
+1. iniciar uma nova sessão do Codex na raiz do projeto;
+2. pedir explicitamente o uso da skill `refactor-arch`;
+3. executar somente Fases 1 e 2;
+4. confirmar que nenhum arquivo da aplicação mudou;
+5. revisar o relatório gerado e registrar quantos achados manuais foram redescobertos;
+6. responder `y` ao gate na mesma sessão;
+7. deixar a skill executar a Fase 3;
+8. exigir boot, validação de endpoints e comparação antes/depois;
+9. revisar `reports/audit-project-N.md` e `reports/execution-project-N.md`;
+10. commitar o resultado daquele projeto separadamente.
 
-## Resultados
-
-### Auditorias da Fase 2
-
-| Projeto | CRITICAL | HIGH | MEDIUM | LOW | Total |
-|---|---:|---:|---:|---:|---:|
-| `code-smells-project` | 5 | 2 | 3 | 2 | 12 |
-| `ecommerce-api-legacy` | 3 | 3 | 3 | 2 | 11 |
-| `task-manager-api` | 1 | 2 | 4 | 2 | 9 |
-
-### Estado atual da execução
-
-- [x] Análise manual dos três projetos
-- [x] Skill inicial com três fases
-- [x] Catálogo com mais de 8 anti-patterns e severidades distribuídas
-- [x] Detecção de APIs deprecated incluída
-- [x] Playbook com mais de 8 transformações
-- [x] Relatórios da Fase 2 salvos em `reports/`
-- [x] Gate de confirmação antes da Fase 3
-- [ ] Skill copiada para os três projetos
-- [ ] Fase 3 executada no projeto 1
-- [ ] Fase 3 executada no projeto 2
-- [ ] Fase 3 executada no projeto 3
-- [ ] Boot e endpoints validados nos três projetos
-- [ ] Logs/screenshots de execução registrados
-
-Os itens pendentes não são apresentados como concluídos até que a execução real seja feita.
-
-## Como Executar
-
-### Pré-requisitos
-
-- OpenAI Codex instalado e autenticado;
-- Python compatível com os projetos Flask;
-- Node.js e npm compatíveis com o projeto Express;
-- `curl` para smoke tests.
-
-### Invocar a skill
-
-Dentro de cada projeto, solicite ao Codex a execução explícita da skill `refactor-arch`:
+### Comando de entrada
 
 ```bash
 cd code-smells-project
-codex "Use a skill refactor-arch neste projeto. Execute as Fases 1 e 2, salve o relatório e pare para minha aprovação antes da Fase 3."
-
-cd ../ecommerce-api-legacy
-codex "Use a skill refactor-arch neste projeto. Execute as Fases 1 e 2, salve o relatório e pare para minha aprovação antes da Fase 3."
-
-cd ../task-manager-api
-codex "Use a skill refactor-arch neste projeto. Execute as Fases 1 e 2, salve o relatório e pare para minha aprovação antes da Fase 3."
+codex "Use obrigatoriamente a skill refactor-arch. Execute as Fases 1 e 2, gere o relatório e as evidências, e pare no gate antes da Fase 3."
 ```
 
-Após revisar o relatório, autorize explicitamente a Fase 3.
+Repetir em `ecommerce-api-legacy` e `task-manager-api`. Após revisar o relatório, responder `y` na própria sessão.
 
-### Validar
+### Critérios de aprovação por projeto
 
-```bash
-bash scripts/validation/run-all.sh
+- stack e domínio detectados corretamente;
+- pelo menos cinco findings;
+- pelo menos um CRITICAL ou HIGH;
+- arquivos e linhas exatos;
+- detecção de API deprecated quando sustentada pela versão instalada;
+- pausa real antes da Fase 3;
+- estrutura MVC adequada ao contexto;
+- configuração extraída;
+- error handling centralizado;
+- application boot aprovado;
+- endpoints originais exercitados;
+- mudanças contratuais de segurança documentadas;
+- relatório e evidências gerados pela execução da skill.
+
+## Estado Atual
+
+- [x] análise manual dos três projetos;
+- [x] skill e referências iniciais;
+- [x] skill copiada para os três projetos;
+- [x] protocolo de integridade e evidência incorporado ao `SKILL.md`;
+- [x] refatorações manuais removidas;
+- [x] relatórios não executados removidos;
+- [ ] referências das três cópias verificadas como idênticas;
+- [ ] Fases 1 e 2 executadas pelo Codex nos três projetos;
+- [ ] Fase 3 executada pela skill nos três projetos;
+- [ ] boot e endpoints validados nos três projetos;
+- [ ] relatórios, logs e comparação antes/depois incorporados ao README.
+
+## Resultados
+
+Esta seção permanecerá pendente até a execução real da skill. Não há contagens finais, validação aprovada ou screenshots declaradas antes dessa etapa.
+
+Os arquivos esperados ao final são:
+
+```text
+reports/
+├── audit-project-1.md
+├── execution-project-1.md
+├── audit-project-2.md
+├── execution-project-2.md
+├── audit-project-3.md
+└── execution-project-3.md
 ```
-
-Cada script deve iniciar a aplicação, aguardar readiness, consultar endpoints representativos, encerrar o processo e retornar código diferente de zero em caso de falha.
-
-## Estrutura dos relatórios
-
-- `reports/audit-project-1.md`
-- `reports/audit-project-2.md`
-- `reports/audit-project-3.md`
-
-## Observação acadêmica
-
-O trabalho usa OpenAI Codex, uma das ferramentas permitidas pelo enunciado. A documentação distingue claramente análise estática, execução da skill e validação real para evitar evidências artificiais de conclusão.
