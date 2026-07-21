@@ -2,12 +2,20 @@
 
 ## Project profile
 
-- Stack: Python 3.12.3 disponível como `python3`; Flask 3.1.1 e flask-cors 5.0.1 declarados em `requirements.txt` (dependências não instaladas nesta execução)
+- Stack: Python 3.12.3 via `.venv/bin/python`, pip 26.1.2, Flask 3.1.1 e flask-cors 5.0.1 disponíveis no ambiente virtual preparado
 - Database: SQLite, arquivo relativo `loja.db`
 - Domain: API de e-commerce, cobrindo produtos, usuários/login, pedidos e relatório de vendas
 - Source files analyzed: 4 (`app.py`, `controllers.py`, `database.py`, `models.py`)
 - Public endpoints: 19
-- Baseline status: BLOCKED; `bash scripts/validation/validate-code-smells.sh` encerrou com `python runtime not found`, sem boot da aplicação ou validação de endpoints
+- Baseline status: PASSED
+- Syntax: 4 arquivos Python aprovados
+- Boot: aprovado
+- Readiness: aprovada
+- Endpoints: 19/19 paths originais exercitados
+- Database: SQLite descartável e isolado
+- `/admin/query`: somente um `SELECT` seguro foi executado; mutações e DDL arbitrários não foram exercitados por segurança
+- Official isolated validation: aprovada
+- Baseline evidence: os comandos completos e os resultados por endpoint estão documentados em `reports/execution-project-1.md`
 
 ## Executive summary
 
@@ -190,7 +198,7 @@ Findings adicionais descobertos pela skill, sem equivalente manual listado: `SEC
 - `/admin/reset-db` e `/admin/query` são públicos no código atual; removê-los ou exigir autorização é uma mudança deliberada motivada por segurança e precisa ser comunicada.
 - Devem ser preservados métodos, paths, status de sucesso e campos dos endpoints públicos restantes, especialmente os envelopes `dados`/`sucesso`.
 - Remover `senha` das respostas de usuários é uma correção de segurança intencional; login deve continuar retornando somente os campos não sensíveis já observados.
-- A validação baseline não foi concluída porque o script exige `python`, inexistente no ambiente, e as dependências não estão instaladas; nenhum endpoint foi executado nesta sessão.
+- A validação baseline pré-refatoração foi concluída com sucesso; os comandos completos e os resultados por endpoint estão documentados em `reports/execution-project-1.md`.
 
 ## Approval gate
 
