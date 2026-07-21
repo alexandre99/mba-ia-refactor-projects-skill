@@ -109,11 +109,55 @@ The table covers 19 unique paths. /admin/reset-db was validated only because the
 4. Existing security findings were reproduced; no severity was changed and no findings report was edited.
 5. No refactoring, application edit, dependency install, test creation or skill edit was performed.
 
+## Phase 3 — Refactoring
+
+The explicit approval gate response was `y`. Phase 3 then refactored the application in small slices while preserving the original route map and ordinary endpoint status/response shapes.
+
+### Commands and outcomes
+
+| Exact command | Exit | Result |
+| --- | ---: | --- |
+| `rtk .venv/bin/python -m compileall -q .` | 0 | All application modules compiled successfully. |
+| `env DATABASE_PATH=:memory: SEED_ADMIN_PASSWORD=admin123 .venv/bin/python -c "import app; print('routes', len(list(app.app.url_map.iter_rules())))"` | 0 | Composition root imported successfully; 20 Flask rules were registered. |
+| `env DATABASE_PATH=:memory: ADMIN_TOKEN=validation-token SEED_ADMIN_PASSWORD=admin123 APP_ENV=test rtk .venv/bin/python ../scripts/validation/validate-code-smells-endpoints.py` | 0 | 19 original paths plus security probes passed against an isolated in-memory database. |
+| `env PYTHON_BIN=/home/alexandredev/fullcycle-mba/mba-ia-refactor-projects-skill/code-smells-project/.venv/bin/python PORT=5002 bash ../scripts/validation/validate-code-smells.sh` | 0 | Official isolated boot/smoke validation passed on port 5002. |
+| `rtk git diff --check` | 0 | No whitespace errors. |
+
+An earlier inline matrix attempt exited 1 because the test expected 11 products after creating and deleting a helper product; the correct post-operation count is 10. The corrected deterministic endpoint script above passed, with no application mismatch.
+
+### Architecture changes
+
+- `app.py` is now the composition root and application factory; configuration comes from environment-backed `Settings`, with debug disabled and loopback binding by default.
+- `controllers.py` handles transport parsing, response mapping and expected application errors only.
+- `services/` owns product, user, order, administration and health workflows.
+- `repositories/` owns parameterized SQL and persistence mapping; order reads use joins instead of query-in-loop access.
+- `database.py` owns schema/seed/legacy-password migration and configurable database setup.
+- `models.py` remains only as a compatibility facade for legacy imports; it no longer owns SQL or unrelated workflows.
+- `scripts/validation/validate-code-smells.sh` is now configurable and isolated by disposable SQLite by default. `validate-code-smells-endpoints.py` covers the complete original path matrix in memory.
+
+### Intentional security contract changes
+
+- `GET /health` still returns 200 and counts, but no longer returns `secret_key`, `debug` or `db_path`.
+- `GET /usuarios` and `GET /usuarios/<id>` preserve their ordinary success statuses and public fields but no longer return `senha`.
+- `POST /admin/reset-db` now returns 403 without `X-Admin-Token`; an explicitly configured token allows the destructive operation in an isolated environment.
+- `POST /admin/query` allows only the fixed product-count `SELECT`; arbitrary mutation, DDL and other request-controlled SQL return 400.
+- Seed credentials are no longer hardcoded: the admin seed password is supplied through `SEED_ADMIN_PASSWORD` or generated randomly, and all stored passwords use adaptive hashes.
+
+### Post-refactoring findings review
+
+Resolved or materially mitigated: `SEC-001`, `SEC-002`, `SEC-003`, `SEC-004`, `ARCH-001`, `ARCH-002`, `ARCH-003`, `DATA-001`, `QUAL-001`, `PERF-001`, `ERR-001`, `TEST-001`, `QUAL-002` and `QUAL-004`.
+
+Remaining or intentionally retained risks: `OPS-001` is reduced because debug is off and the default bind is loopback, but `python app.py` still uses Flask's development server for legacy compatibility; production should use an external WSGI server. `QUAL-005` remains because differing not-found response envelopes were preserved for compatibility and are documented as a contract risk.
+
+### Files changed in Phase 3
+
+- Application: `app.py`, `controllers.py`, `database.py`, `models.py`, `config.py`, `domain.py`, `errors.py`.
+- Repositories: `repositories/__init__.py`, `repositories/admin_repository.py`, `repositories/health_repository.py`, `repositories/order_repository.py`, `repositories/product_repository.py`, `repositories/user_repository.py`.
+- Services: `services/__init__.py`, `services/admin_service.py`, `services/health_service.py`, `services/order_service.py`, `services/product_service.py`, `services/user_service.py`.
+- Validation: `../scripts/validation/validate-code-smells.sh`, `../scripts/validation/validate-code-smells-endpoints.py`.
+
 ## Related audit and gate status
 
-- Findings report: ../reports/audit-project-1.md (not modified in this attempt).
-- Previous BLOCKED state: replaced by this real baseline result.
-- Phase 3: not started.
-
-Proceed with Phase 3 refactoring? [y/n]
-
+- Findings report: `../reports/audit-project-1.md`; its original findings, severities and recommendations were preserved.
+- Baseline status: `PASSED`; detailed pre-refactoring evidence remains in the earlier sections of this report.
+- Phase 3: completed; syntax, isolated boot and the 19-path endpoint matrix passed.
