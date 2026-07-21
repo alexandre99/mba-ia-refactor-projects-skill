@@ -4,7 +4,7 @@
 
 - Requested scope: only Phases 1 and 2 of `refactor-arch`.
 - Application source/configuration was not edited.
-- Phase 3 was not executed.
+- The validation safety net was corrected before the gate; Phase 3 was not executed.
 - Final gate: `Proceed with Phase 3 refactoring? [y/n]`
 
 ## Phase 1 — project analysis
@@ -18,7 +18,7 @@ The analysis was performed from the current source, package metadata, installed 
 - Application source files: 3 (`src/app.js`, `src/AppManager.js`, `src/utils.js`).
 - Declared public endpoints: 3.
 - Startup: `npm start` → `node src/app.js`; fixed port `3000`.
-- Validation availability: `../scripts/validation/validate-ecommerce-legacy.sh` exists, but only probes `/` and explicitly leaves endpoint inventory pending.
+- Validation availability: `../scripts/validation/validate-ecommerce-legacy.sh` is now a complete deterministic safety net: it installs/verifies dependencies, starts the app, uses existing `GET /api/admin/financial-report` readiness, validates the legacy contract matrix, and cleans up the process.
 
 ### Phase 1 inspected commands
 
@@ -36,22 +36,58 @@ The analysis was performed from the current source, package metadata, installed 
 | `rtk nl -ba src/AppManager.js` | 0 | Captured exact route, SQL, workflow, and class lines `1-141`. |
 | `rtk nl -ba src/utils.js` | 0 | Captured exact config/cache/pseudo-crypto lines `1-25`. |
 | `rtk nl -ba package.json` | 0 | Captured startup and dependency declarations at `1-13`. |
-| `rtk sed -n '1,180p' ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Confirmed the validator's fixed port, `npm ci`, root readiness probe, and pending endpoint inventory. |
-| `rtk nl -ba ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Captured validator lines `1-32` for exact evidence. |
+| `rtk sed -n '1,180p' ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Confirmed the corrected validator's dependency setup, existing-endpoint readiness, contract probes, and cleanup. |
+| `rtk nl -ba ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Captured the corrected validator lines `1-165` for exact evidence. |
 | `rtk nl -ba api.http` | 0 | Captured the three documented route requests at `3-31`. |
 
 ## Baseline execution
 
-### Official validation command
+### Historical result before safety-net correction
 
 | Command | Exit | Result |
 |---|---:|---|
-| `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` | 1 | `npm ci` installed 191 packages and audited 192; npm reported 13 vulnerabilities (2 low, 4 moderate, 6 high, 1 critical). `npm start` launched and logged `Frankenstein LMS rodando na porta 3000...`, but the validator's `curl -fsS http://127.0.0.1:3000/` readiness probe never succeeded because `/` is undeclared and returned 404. The script exited with `application did not become ready on port 3000`. |
-| `rtk sed -n '1,120p' /tmp/ecommerce-api-legacy-validation.log` | 0 | Confirmed the application startup log; no startup crash was recorded. |
-| `rtk ss -ltnp` | 0 | Confirmed no lingering listener on port 3000 after the script's EXIT cleanup. |
-| `rtk git status --short` | 0 | Confirmed no application/configuration change after baseline; pre-existing skill-reference modifications remained unchanged. |
+| `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` | 1 | The original validator installed 191 packages and audited 192; npm reported 13 vulnerabilities (2 low, 4 moderate, 6 high, 1 critical). npm start launched and logged Frankenstein LMS rodando na porta 3000..., but the validator probed undeclared GET / and exited with application did not become ready on port 3000. |
 
-Baseline conclusion: the official baseline is **FAILED**, not passed. The application booted in the failed run, but the provided readiness contract is invalid for the current route set and no endpoint behavior was validated by that script.
+This historical failure is retained as the reason for the safety-net correction. It is not the final baseline status.
+
+### Corrected safety-net baseline
+
+The validator was updated outside ecommerce-api-legacy/src and then executed against the unchanged legacy application.
+
+| Command or internal check | Exit | Result |
+|---|---:|---|
+| `rtk bash -n ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Shell syntax passed. |
+| `npm ci` (inside validator) | 0 | Installed 191 packages and audited 192; npm reported 13 vulnerabilities (2 low, 4 moderate, 6 high, 1 critical), recorded without applying dependency or application changes. |
+| `npm ls --depth=0` (inside validator) | 0 | Verified express@4.22.1 and sqlite3@5.1.7. |
+| `node -e 'require("express"); require("sqlite3");'` (inside validator) | 0 | Runtime dependency loading passed. |
+| `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` (first complete corrected run) | 0 | Booted the app, passed all contract probes, and ran cleanup. |
+| `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` (final run after retry-output correction) | 0 | Booted the app, passed all contract probes, and ran cleanup. This is the authoritative baseline run. |
+
+The first readiness curl can return transient connection exit 7 while the background server is still starting; the validator retries it. The final readiness request returned 200 and its JSON parser accepted an array. A readiness timeout, JSON mismatch, endpoint mismatch, or later curl failure exits non-zero.
+
+#### Final endpoint contract matrix
+
+| Probe executed by validator | Expected/observed result | Probe result |
+|---|---|---|
+| GET /api/admin/financial-report readiness | 200, JSON array | passed |
+| POST /api/checkout with {} | 400, Bad Request | passed |
+| POST /api/checkout with c_id=999 | 404, Curso não encontrado | passed |
+| POST /api/checkout with card prefix 5 | 400, Pagamento recusado | passed |
+| POST /api/checkout with course 2 and card prefix 4 | 200, JSON containing msg and integer enrollment_id | passed |
+| GET /api/admin/financial-report after approved checkout | 200, JSON array | passed |
+| DELETE /api/users/1 | 200, Usuário deletado, mas as matrículas e pagamentos ficaram sujos no banco. | passed |
+
+### Cleanup and integrity checks
+
+| Command | Exit | Result |
+|---|---:|---|
+| `rtk ss -ltnp` | 0 | No listener remained on port 3000 after validator cleanup. |
+| `rtk ps -ef \| rtk rg 'ecommerce-api-legacy\|src/app.js\|npm start' \|\| true` | 0 | No validation app process remained. |
+| `rtk git diff --check` | 0 | Final whitespace check passed. The first post-write check returned 2 for an extra blank line at EOF in this report; that line was removed before this final exit 0. |
+| `rtk git status --short --untracked-files=all` | 0 | The requested validation script and the two Project 2 reports are modified by this task; no application source is modified. |
+| `rtk git diff -- src` | 0 | Empty; no file under ecommerce-api-legacy/src changed. |
+
+**Final baseline status: PASSED.** The complete corrected validator passed against the current legacy application, including dependency installation/verification, startup, readiness, every required endpoint contract, and process cleanup.
 
 ### Direct legacy startup and endpoint probes
 
@@ -89,21 +125,15 @@ Only after the independent report body was complete, the manual section was insp
 | `rtk sed -n '1,180p' ../README.md` | 0 | Read manual Project 2 analysis at `../README.md:29-41`. |
 | `rtk sed -n '1,90p' ../reports/audit-project-1.md` | 0 | Read an existing report only to preserve the repository's comparison/evidence convention; it did not supply Project 2 findings. |
 
-Comparison result: 8 manual findings; 6/8 rediscovered semantically (5 integral, 1 partial); 2 not rediscovered (cryptic variables and mutable global state). The partial match was the manual card/gateway logging item: the independent `SEC-003` finding cites the payment key in the checkout log, while the catalog has no dedicated sensitive-financial-logging rule and no separate card-logging finding was created. Additional independent findings without a direct manual equivalent: `SEC-002`, `SEC-004`, `ARCH-003`, `TEST-001`, and `QUAL-002`.
+Comparison result: 8 manual findings; 6/8 rediscovered semantically (5 integral, 1 partial); 2 not rediscovered (cryptic variables and mutable global state). The partial match was the manual card/gateway logging item: the independent `SEC-003` finding cites the payment key in the checkout log, while the catalog has no dedicated sensitive-financial-logging rule and no separate card-logging finding was created. Additional independent findings without a direct manual equivalent: `SEC-002`, `SEC-004`, `ARCH-003`, and `QUAL-002`. `TEST-001` was retained as a historical pre-gate finding and resolved in the validation area before Phase 3.
 
 ## Integrity, limitations, and deviations
 
-- No application files were edited. The only requested artifacts are the audit and execution reports under `../reports/`; pre-existing modifications under `.codex/skills/refactor-arch/references/` and the sibling target's skill references were preserved.
-- The official validator runs `npm ci`; this regenerated ignored installed dependencies but did not change tracked application/configuration files. Its npm audit warnings are recorded, not converted into a `DEP-001` finding without source/API migration evidence.
-- The validator has no configurable port/database and probes `/`, so its failed result cannot establish endpoint correctness. Direct probes used the application's fixed in-memory database and therefore do not prove durable production persistence.
+- No application file under `ecommerce-api-legacy/src` was edited. This task changed the validation script and the two Project 2 reports; pre-existing modifications under `.codex/skills/refactor-arch/references/` and the sibling target's skill references were preserved.
+- The corrected validator runs `npm ci`, verifies the dependency tree and module loading, starts the fixed-port app, exercises the contract matrix, and cleans up. Its npm audit warnings are recorded, not converted into a `DEP-001` finding without source/API migration evidence.
+- The validator still uses the application's fixed port and in-memory database, so it proves current boot/HTTP behavior but not durable production persistence. It no longer depends on undeclared `GET /`; the readiness route is existing `GET /api/admin/financial-report`.
 - The direct endpoint probe intentionally did not test arbitrary SQL/DDL because no such endpoint exists in the current source and destructive experiments were out of scope.
 - Because the current app has no authentication route/middleware, authorization behavior for future protected administration was not testable; the unauthenticated reachability of the delete route was observed.
 - Transient `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` errors occurred during some sandbox read/patch attempts; they caused no application or report-content change. Successful read/write operations were retried and their exit outcomes are recorded above.
 
 ## Final state
-
-- `PHASE 1: PROJECT ANALYSIS` completed.
-- `PHASE 2: ARCHITECTURE AUDIT COMPLETE` completed.
-- Phase 3 not run; awaiting explicit user response at the required gate.
-
-Proceed with Phase 3 refactoring? [y/n]

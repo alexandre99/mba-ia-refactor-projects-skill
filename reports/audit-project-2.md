@@ -7,13 +7,13 @@
 - Domain: LMS/e-commerce de cursos, checkout, matrículas, pagamentos e relatório financeiro
 - Source files analyzed: 3 (`src/app.js`, `src/AppManager.js`, `src/utils.js`)
 - Public endpoints: 3 declarados (`POST /api/checkout`, `GET /api/admin/financial-report`, `DELETE /api/users/:id`)
-- Baseline status: failed; the official script booted the process but tested undeclared `GET /`, which returned 404
+- Baseline status: PASSED; the corrected safety-net script booted the process and validated the legacy endpoint contracts without depending on `GET /`
 
 ## Executive summary
 
 CRITICAL: 2 | HIGH: 4 | MEDIUM: 2 | LOW: 2
 
-The current implementation exposes destructive administration without authorization, commits production-looking credentials, and stores passwords through a non-cryptographic routine. The same `AppManager` class combines database setup, route declaration, HTTP parsing, business workflows, persistence, reporting, and deletion. The first refactoring order should isolate configuration/secrets and authorization, then extract use cases and repositories while preserving the observed route contracts. The official baseline is not a passing behavioral safety net because its readiness probe targets a route that does not exist.
+The current implementation exposes destructive administration without authorization, commits production-looking credentials, and stores passwords through a non-cryptographic routine. The same `AppManager` class combines database setup, route declaration, HTTP parsing, business workflows, persistence, reporting, and deletion. The first refactoring order should isolate configuration/secrets and authorization, then extract use cases and repositories while preserving the observed route contracts. The corrected safety net now passes the legacy behavioral baseline; the remaining risks are in the application itself.
 
 This report was produced from the current source and configuration files before consulting the repository's manual Project 2 analysis. Findings are facts observed in the cited lines; impacts and recommendations are architectural/security inferences from those facts.
 
@@ -75,13 +75,13 @@ This report was produced from the current source and configuration files before 
 - Recommendation: Move reporting to a repository query using joins/aggregation or bounded batch queries, then map rows to the existing response shape in a service.
 - Validation: Run a fixture with multiple courses/enrollments, measure query count, and compare totals, student ordering, and response shape with the baseline.
 
-### [MEDIUM] TEST-001 — No executable endpoint safety net covers the contract
+### [MEDIUM] TEST-001 — Behavioral safety net was missing before Phase 3 (resolved)
 
-- File: `package.json:6-8` and `../scripts/validation/validate-ecommerce-legacy.sh:21-32`
-- Evidence: The package exposes only `start` and no test script. The repository has no project test files in the analyzed inventory. The available validator probes only `GET /` and explicitly prints `endpoint inventory still pending`; that probe fails because the application has no `/` route.
-- Impact: Architectural changes have no deterministic automated check for checkout outcomes, report shape, deletion behavior, or failure paths. A passing boot alone would not prove observable behavior preservation.
-- Recommendation: Add a deterministic, isolated endpoint validator in the validation area before Phase 3, covering boot, success, validation failure, not-found, payment denial, report, and protected administration behavior.
-- Validation: Execute the validator from a clean dependency state and require non-zero exit on startup, status, response-shape, or cleanup failures.
+- File: `package.json:6-8` and `../scripts/validation/validate-ecommerce-legacy.sh:1-165`
+- Evidence: The package exposes only `start` and no test script, and the initial validator covered only undeclared `GET /`. The validator was corrected before Phase 3 to install and verify dependencies, use existing `GET /api/admin/financial-report` readiness, exercise all required legacy contracts, validate response shapes, and clean up the spawned process.
+- Impact: Before this correction, architectural changes lacked a deterministic automated check for checkout outcomes, report shape, deletion behavior, or failure paths. The current safety net now supplies that gate; the application still requires the behavioral and security refactoring described below.
+- Recommendation: Keep the corrected validator as a mandatory pre- and post-refactoring gate, and require explicit approval of this safety net before changing application files.
+- Validation: `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` completed with exit 0 after `npm ci`, dependency verification, boot, all endpoint probes, and process cleanup.
 
 ### [LOW] QUAL-002 — Domain and transport constants are embedded in handlers
 
@@ -101,14 +101,14 @@ This report was produced from the current source and configuration files before 
 
 ## Proposed Phase 3 plan
 
-1. Externalize/rotate secrets and add explicit authorization for destructive administration (`SEC-002`, `SEC-003`), then replace the password routine and seed/default credentials (`SEC-004`).
-2. Add deterministic endpoint validation and capture the current contract (`TEST-001`, `QUAL-005`).
+1. Preserve and explicitly approve the corrected safety net (`TEST-001`, `QUAL-005`) before any application file is changed; use it to capture and compare the current route/status/response contract.
+2. Externalize/rotate secrets and add explicit authorization for destructive administration (`SEC-002`, `SEC-003`), then replace the password routine and seed/default credentials (`SEC-004`).
 3. Extract a composition root, routers/controllers, checkout/reporting services, and repositories in small steps (`ARCH-001`, `ARCH-002`, `ARCH-003`); preserve parameterized queries and route contracts.
 4. Replace the report's query-in-loop with a repository query/aggregation (`PERF-001`) and centralize named constants (`QUAL-002`).
 
 ## Contract risks
 
-- `GET /` is not a public application endpoint, although the official validator assumes it exists; changing this would be a deliberate validation-script or compatibility decision.
+- `GET /` is not a public application endpoint; the corrected validator deliberately uses existing `GET /api/admin/financial-report` for readiness and does not require a compatibility route.
 - `POST /api/checkout` currently uses `usr`, `eml`, `pwd`, `c_id`, and `card`, returns plain-text failures for several cases, and returns `{msg, enrollment_id}` on success.
 - `GET /api/admin/financial-report` is reachable without an authorization check and returns course revenue and student names; this is an observed exposure to resolve during security design even though the catalog rule used here is scoped to destructive administration.
 - `DELETE /api/users/:id` returns success regardless of the database callback error and explicitly leaves related records; any correction must define whether deletion is restricted, transactional, or removed.
