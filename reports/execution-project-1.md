@@ -5,11 +5,13 @@
 - Date: 2026-07-21
 - Timezone: America/Sao_Paulo (-03)
 - New baseline timestamp: 2026-07-21T13:52:29-03:00
-- Scope: pre-refactoring baseline only; Phase 3 was not started.
+- Scope: complete execution of Phases 1, 2 and 3, including the pre-refactoring baseline and the post-refactoring execution and validation.
+- Gate: explicit approval response `y`; the baseline was completed before application changes, and Phase 3 refactoring was performed after that approval.
+- Post-refactoring status: completed and validated; application and validation files were modified in Phase 3 as listed below.
 - Direct-check working directory: /home/alexandredev/fullcycle-mba/mba-ia-refactor-projects-skill/code-smells-project
 - Required skill: .codex/skills/refactor-arch/SKILL.md; its six required references were read in full.
-- .codex/napkin.md was absent and was not created, per the explicit task constraint.
-- No application source, dependency, configuration, skill, test, audit report or napkin file was changed. Only this execution report was replaced.
+- At the baseline checkpoint, .codex/napkin.md was absent and was not created, per the explicit task constraint.
+- Before the gate, no application source, dependency, configuration, skill, test, audit report or napkin file had been changed. Phase 3 subsequently changed the application and validation files listed below; the audit report was preserved without changing its findings.
 
 ## Baseline status: PASSED — legacy behavior and defects separately recorded
 
@@ -31,9 +33,9 @@ requirements.txt:1-2 declares flask==3.1.1 and flask-cors==5.0.1. No dependency 
 
 ## Startup command and inventory evidence
 
-The correct legacy command is documented in README.md:7-10 as python app.py. app.py:80-88 initializes the database and calls app.run(host="0.0.0.0", port=5000, debug=True). Routes are declared in app.py:11-30, app.py:32-45, app.py:47-78; handlers are in controllers.py:5-292.
+At the pre-refactoring baseline, the correct legacy command was documented in README.md:7-10 as python app.py. app.py:80-88 initializes the database and calls app.run(host="0.0.0.0", port=5000, debug=True). Routes are declared in app.py:11-30, app.py:32-45, app.py:47-78; handlers are in controllers.py:5-292.
 
-The validation script at ../scripts/validation/validate-code-smells.sh:1-35 uses bare python, fixed port 5000, relative loja.db, and probes only /health, / and /produtos. To preserve the original tree, it was run from a temporary copy of the same source/script with project .venv/bin first in PATH; no activation or installation was used.
+At the pre-refactoring baseline, the validation script at ../scripts/validation/validate-code-smells.sh:1-35 used bare python, fixed port 5000, relative loja.db, and probed only /health, / and /produtos. To preserve the original tree, it was run from a temporary copy of the same source/script with project .venv/bin first in PATH; no activation or installation was used. The script was made configurable and isolated during Phase 3, as recorded below.
 
 ### Exact commands and outcomes
 
@@ -101,13 +103,13 @@ The table covers 19 unique paths. /admin/reset-db was validated only because the
 - Dependency failure: none; .venv runtime and Flask dependencies were available.
 - Infrastructure failure: initial default-shell attempts emitted bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted. Commands were rerun with approved fallback; this did not affect boot or endpoint results.
 
-## Limitations and remaining blockers
+## Baseline limitations and remaining risks
 
 1. The official script probes only /health, / and /produtos; the expanded inline probe covered all 19 original paths.
-2. The official script is not isolated/configurable itself. Its successful result used an identical temporary copy with .venv/bin first in PATH because it resolves bare python and uses fixed port/database settings.
+2. At the baseline, the official script was not isolated/configurable itself. Its successful result used an identical temporary copy with .venv/bin first in PATH because it resolved bare python and used fixed port/database settings. Phase 3 made the script configurable and isolated by default, as recorded below.
 3. Arbitrary SQL mutation/DDL was not exercised, even in the disposable database. Reachability and safe SELECT behavior were established; the destructive capability remains documented in the audit.
 4. Existing security findings were reproduced; no severity was changed and no findings report was edited.
-5. No refactoring, application edit, dependency install, test creation or skill edit was performed.
+5. During the baseline phase, no refactoring, application edit, dependency install, test creation or skill edit was performed. Phase 3 refactoring and validation changes are documented in the later sections.
 
 ## Phase 3 — Refactoring
 
