@@ -32,6 +32,26 @@ class SqliteDatabase {
         });
     }
 
+    async transaction(work) {
+        let started = false;
+        try {
+            await this.run('BEGIN TRANSACTION');
+            started = true;
+            const result = await work();
+            await this.run('COMMIT');
+            return result;
+        } catch (error) {
+            if (started) {
+                try {
+                    await this.run('ROLLBACK');
+                } catch (rollbackError) {
+                    error.rollbackError = rollbackError;
+                }
+            }
+            throw error;
+        }
+    }
+
     close() {
         return new Promise((resolve, reject) => {
             this.connection.close(error => (error ? reject(error) : resolve()));

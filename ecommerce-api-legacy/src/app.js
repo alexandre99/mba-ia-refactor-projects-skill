@@ -23,7 +23,8 @@ async function createApp({ database } = {}) {
         courseRepository: new CourseRepository(db),
         userRepository,
         checkoutRepository: new CheckoutRepository(db),
-        cache: new Map()
+        cache: new Map(),
+        transaction: db.transaction.bind(db)
     });
     const reportService = new ReportService(new ReportRepository(db));
     const userService = new UserService(userRepository);

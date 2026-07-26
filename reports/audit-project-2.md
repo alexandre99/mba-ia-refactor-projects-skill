@@ -1,5 +1,7 @@
 # Architecture Audit Report — ecommerce-api-legacy
 
+> Historical evidence: the original report and its prior Phase 3 disposition are preserved above. The updated-protocol re-evaluation below was generated independently from the current source on 2026-07-26.
+
 ## Project profile
 
 - Stack: Node.js `v20.20.2`, npm `10.8.2`, Express `4.22.1`, SQLite3 `5.1.7`
@@ -132,3 +134,151 @@ This report was produced from the current source and configuration files before 
 
 - Approval received: y.
 - Phase 3 refactoring completed and post-refactor validation passed.
+
+## Updated protocol re-evaluation — 2026-07-26
+
+### Current project profile
+
+- Stack: Node.js `v20.20.2`, npm `10.8.2`, Express `4.22.1`, SQLite3 `5.1.7`
+- Database: SQLite, default `:memory:`; `DATABASE_PATH` can select a file
+- Domain: LMS/e-commerce checkout, users, enrollments, payments, audit logs, and financial reporting
+- Current source files analyzed: 20 JavaScript files under `src/`
+- Public endpoints: 3 declared routes
+- Startup command: `npm start` → `node src/server.js`
+- Baseline status in this run: PASSED; `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` exited 0
+- Explicit Phase 3 authority: the current user request authorizes only corrections required by this re-evaluation, and requires preservation of historical evidence
+
+### PHASE 1: PROJECT ANALYSIS
+
+The current application has a composition root in `src/app.js`, a server entrypoint in `src/server.js`, route registration in `src/routes.js`, HTTP controllers, domain services, repositories, a SQLite adapter, database initialization, configuration, middleware, and password hashing. The three declared endpoints are:
+
+| Method | Path | Handler | Success/status behavior | Response shape |
+|---|---|---|---|---|
+| POST | `/api/checkout` | `CheckoutController.create` | `200` for an approved checkout; `400`/`404` for expected failures | `{msg, enrollment_id}` on success; legacy plain text on expected failures |
+| GET | `/api/admin/financial-report` | `ReportController.financialReport` | `200` | JSON array of course/revenue/students objects |
+| DELETE | `/api/users/:id` | `UserController.delete`, protected by `requireAdminToken` | `401` without the configured token; `200` with it | Plain text |
+
+The checkout use case reads a course and user, then may create a user, enrollment, payment, audit row, and in-memory cache entry. Repository methods parameterize values, but each write currently uses SQLite autocommit and no shared transaction. The report uses one joined query and a service mapper. The admin token fails closed when absent. No endpoint exposes password verification or arbitrary SQL.
+
+### Phase 1 inspected commands
+
+| Command | Exit | Evidence |
+|---|---:|---|
+| `rtk node --version` | 0 | `v20.20.2` |
+| `rtk npm --version` | 0 | `10.8.2` |
+| `rtk npm ls --depth=0` | 0 | `express@4.22.1`, `sqlite3@5.1.7` |
+| `rtk rg --files -g '!node_modules' -g '!*.db' -g '!*.sqlite'` | 0 | Current project files and 20 `src/` files inventoried |
+| `rtk nl -ba src/app.js src/server.js src/routes.js src/config.js ...` | 0 | Current composition, startup, routes, configuration, controllers, services, repositories, infrastructure, middleware, and security lines inspected |
+| `rtk rg -n "router\\.(get|post|put|patch|delete)|app\\.(get|post|put|patch|delete)|listen\\(|process\\.env|cache|run\\(|get\\(|all\\(" src package.json ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Endpoint, persistence, configuration, and effect references inventoried |
+| `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Baseline boot, representative endpoints, authorization behavior, and cleanup passed |
+| `rtk git diff --check` | 0 | No whitespace errors before application corrections |
+
+### Phase 2 — current architecture audit
+
+CRITICAL: 0 | HIGH: 1 | MEDIUM: 2 | LOW: 2
+
+The prior Phase 3 removed the historical security and layering findings. The updated catalog identifies an unresolved transactional boundary, an unsafe production storage default, an incomplete finding-specific safety net, one remaining magic policy value, and the deliberately preserved legacy response divergence.
+
+#### [HIGH] DATA-002 — Checkout writes lack an atomic transaction boundary
+
+- File: `src/services/checkoutService.js:22-36`; `src/repositories/checkoutRepository.js:6-24`; `src/infrastructure/database.js:8-14`
+- Evidence: A successful checkout can create a user, enrollment, payment, and audit row through separate `db.run` calls. `SqliteDatabase` exposes `run`, `get`, `all`, and `close`, but no begin/commit/rollback or transaction callback. A later failure can therefore leave earlier writes committed.
+- Impact: A failed checkout can leave an orphan user or enrollment without the corresponding payment/audit state, causing inconsistent business and financial data and unsafe retries.
+- Recommendation: Add an explicit database transaction/unit-of-work boundary owned by `CheckoutService`; commit all related writes together, roll back on any intermediate failure, and update the cache only after commit.
+- Validation: Inject a deterministic failure after a user/enrollment write and assert that user, enrollment, payment, audit, and cache state are all unchanged; then execute the success path and assert committed rows and the post-commit cache entry.
+
+#### [MEDIUM] OPS-001 — Production defaults to ephemeral in-memory storage
+
+- File: `src/config.js:1-5`; `src/infrastructure/initializeDatabase.js:1-21`; `src/server.js:4-6`
+- Evidence: `databasePath` defaults to `':memory:'` whenever `DATABASE_PATH` is absent, and startup always creates schema and seed data. `NODE_ENV` is not considered and production startup does not fail closed when durable storage is unconfigured.
+- Impact: A deployment that omits `DATABASE_PATH` loses users, enrollments, payments, and audit history on restart and can appear healthy while discarding production state.
+- Recommendation: Keep the disposable in-memory default only for non-production execution; require an explicit non-memory `DATABASE_PATH` when `NODE_ENV=production`.
+- Validation: Execute production configuration loading with `DATABASE_PATH` unset and assert non-zero failure; execute the normal isolated validator with the development default and assert boot/endpoint behavior remains unchanged.
+
+#### [MEDIUM] TEST-002 — Safety net has no finding-specific rollback/effect proof
+
+- File: `../scripts/validation/validate-ecommerce-legacy.sh:123-176`
+- Evidence: The validator checks readiness, successful checkout/report behavior, expected validation failures, and authorized/unauthorized deletion, but it does not inject an intermediate persistence failure or inspect rollback and cache state. Passing endpoint smoke tests cannot detect DATA-002.
+- Impact: A future refactor can preserve all happy-path HTTP responses while reintroducing partial checkout writes or moving effects before commit.
+- Recommendation: Extend the target-specific validator with a deterministic service-level failure injection and success-path transaction probe, plus stable unexpected-error response mapping where relevant.
+- Validation: Run the extended validator and require non-zero failure if injected checkout failure leaves any related row or cache entry behind.
+
+#### [LOW] QUAL-002 — Checkout policy still contains magic values
+
+- File: `src/services/checkoutService.js:17,36`
+- Evidence: The payment decision uses the literal card prefix `'4'`, and the cache key uses the literal prefix `'last_checkout_'` inside the workflow. Existing status/message constants are centralized, but these policy values remain embedded in the service.
+- Impact: Policy changes require editing workflow code and can create inconsistent behavior if another checkout path introduces a different literal.
+- Recommendation: Move the approved-card prefix and cache-key prefix into named checkout constants while preserving the external request and response contract.
+- Validation: Assert the service no longer embeds those policy literals, then run approved/denied checkout probes and the transaction probe.
+
+#### [LOW] QUAL-005 — Legacy response construction remains intentionally divergent
+
+- File: `src/controllers/checkoutController.js:12-30`; `src/controllers/reportController.js:6-12`; `src/controllers/userController.js:6-12`
+- Evidence: Checkout expected failures and user deletion use plain text, checkout success uses a JSON object, and the financial report returns a bare JSON array. The separate controllers preserve these legacy response shapes.
+- Impact: Consumers must handle multiple media/body conventions, and a future endpoint can drift without a shared response policy.
+- Recommendation: Preserve the observed contract for this compatibility-sensitive task; document the divergence and centralize response mapping only in a separately approved contract change.
+- Validation: Compare status, content type, body text, JSON field names, and array/object shape for every endpoint in the target validator.
+
+### Rules assessed but not raised
+
+- `SEC-001`, `SEC-002`, `SEC-003`, `SEC-004`: current source uses parameterized repository queries, fail-closed deletion authorization, environment-backed admin configuration, and salted scrypt hashes; no reachable arbitrary execution, committed usable secret, plaintext password flow, or unprotected destructive route was observed.
+- `ARCH-001`, `ARCH-002`, `ARCH-003`: the prior god-module and transport/persistence coupling were removed; current route/controller/service/repository boundaries are real and used.
+- `DATA-003`: `cache.set` occurs after `await this.checkoutRepository.recordAudit(...)` at current `src/services/checkoutService.js:35-36`; the remaining defect is lack of an atomic aggregate commit (`DATA-002`), not an observed cache update before the final current database write. The correction will preserve the after-commit ordering.
+- `DATA-001`, `PERF-001`, `ERR-001`, `DEP-001`, `QUAL-001`, and `TEST-001`: current queries are parameterized/static, the report uses a join, errors map to generic client responses, no authoritative deprecated API evidence was found, validation rules are not duplicated across handlers, and the executable safety net exists and passed.
+
+### Proposed corrective Phase 3 plan
+
+1. Add a transaction callback to `SqliteDatabase` and make `CheckoutService` own one unit of work for user/enrollment/payment/audit writes; retain cache update after successful commit. Addresses `DATA-002` and supplies the proof needed by `TEST-002`.
+2. Make production configuration fail closed unless `DATABASE_PATH` is explicitly non-memory, while retaining `:memory:` for non-production validation. Addresses `OPS-001` without changing the documented development contract.
+3. Move checkout policy literals to `src/constants.js` and extend the target validator with rollback/cache, commit, and error-mapping probes. Addresses `QUAL-002` and closes `TEST-002`; preserve `QUAL-005` as a compatibility limitation.
+
+### Contract risks before correction
+
+- `POST /api/checkout` payload names, statuses, text failures, success object, and enrollment ID type must remain unchanged.
+- `GET /api/admin/financial-report` remains a public JSON array for compatibility; no authorization contract change is authorized by this request.
+- `DELETE /api/users/:id` must continue returning `401` without a token and the historical `200` text only with the configured admin token.
+- The development/default validation path must continue using disposable in-memory SQLite data.
+
+## Approval gate for updated protocol
+
+The user instruction in this Codex session explicitly authorizes the conditional corrective Phase 3 work described above and limits it to findings identified by this re-evaluation. No additional approval prompt is required before those scoped corrections.
+
+### Manual-analysis comparison
+
+Only after the current independent report was complete, `rtk sed -n '1,180p' ../README.md` was executed. The manual Project 2 table contains 8 findings; 1/8 was rediscovered against the current source: checkout without a transaction (`DATA-002`). The other 7 manual findings (committed secrets, sensitive gateway/card logging, the `AppManager` god class, report N+1, callback-pyramid error handling, cryptic legacy variables, and mutable global state) are no longer observed after the prior Phase 3 and were not copied into this current audit. Current `OPS-001`, `TEST-002`, `QUAL-002`, and `QUAL-005` were independently derived from the current implementation and protocol rules.
+
+## Updated protocol final closure — 2026-07-26
+
+### Phase 3 corrective implementation
+
+- `src/infrastructure/database.js:35-53` now owns `BEGIN TRANSACTION`, `COMMIT`, and rollback on failure.
+- `src/app.js:21-27` injects the database transaction function into the checkout service.
+- `src/services/checkoutService.js:25-45` performs user/enrollment/payment/audit writes inside one transaction and updates the cache only after the transaction resolves.
+- `src/config.js:1-14` preserves the development `:memory:` default but rejects absent or `:memory:` storage under `NODE_ENV=production`.
+- `src/constants.js:14-19` owns the approved-card and cache-key policy values.
+- `../scripts/validation/validate-ecommerce-legacy.sh:6,120-127,185-282` accepts a configurable port, checks production storage safety, and executes finding-specific rollback/commit/cache/error/magic-value probes.
+
+### Final finding-disposition matrix
+
+| Finding | Disposition | Final implementation evidence | Validation evidence | Remaining risk |
+|---|---|---|---|---|
+| `DATA-002 — Checkout writes lack an atomic transaction boundary` | `RESOLVED` | `src/infrastructure/database.js:35-53` supplies the unit of work; `src/services/checkoutService.js:28-44` encloses all related writes and places cache update after commit. | `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` exit 0; inline probe at `../scripts/validation/validate-ecommerce-legacy.sh:221-235` injected failure after payment and verified seed counts/cache unchanged, then `238-251` verified committed rows/cache. | None observed in this use case. |
+| `OPS-001 — Production defaults to ephemeral in-memory storage` | `RESOLVED` | `src/config.js:1-14` fails closed for missing or explicit `:memory:` production storage while retaining non-production behavior. | The same validator exited 0; its production guard at `../scripts/validation/validate-ecommerce-legacy.sh:120-125` rejected both unsafe values, and the normal boot path passed. | A durable path's filesystem permissions are deployment-owned and were not tested. |
+| `TEST-002 — Safety net has no finding-specific rollback/effect proof` | `RESOLVED` | `../scripts/validation/validate-ecommerce-legacy.sh:185-282` is executable and checks rollback, post-commit cache, generic error mapping, and policy-literal removal. | `PORT=3017 bash ../scripts/validation/validate-ecommerce-legacy.sh` exited 0, including `Finding-specific validation passed`. | The probe is service-level and does not simulate database process crashes. |
+| `QUAL-002 — Checkout policy still contains magic values` | `RESOLVED` | `src/constants.js:14-19` defines `CHECKOUT_POLICY`; `src/services/checkoutService.js:18,44` consumes it. | The validator's `203-205` assertions found neither old service literal, and the approved/denied endpoint probes passed; command exit 0. | None for the audited literals. |
+| `QUAL-005 — Legacy response construction remains intentionally divergent` | `PARTIALLY_RESOLVED` | Controllers remain contract-specific at `src/controllers/checkoutController.js:12-30`, `src/controllers/reportController.js:6-12`, and `src/controllers/userController.js:6-12`; no incompatible envelope rewrite was introduced. | The full validator exited 0 for all legacy status/body shapes, including `../scripts/validation/validate-ecommerce-legacy.sh:144-183`. | Plain-text and JSON response conventions remain intentionally different for compatibility. |
+
+No CRITICAL or HIGH finding is `PARTIALLY_RESOLVED` or `NOT_ADDRESSED`. `DATA-003` remains not raised because the cache is after the aggregate commit in the final implementation. The unauthenticated financial report and in-memory development default remain documented compatibility/development choices, outside the scoped current findings; the prior deletion authorization change remains historical and unchanged.
+
+### Final validation status
+
+- Node syntax checks over all current `src` JavaScript files: exit 0.
+- `rtk bash -n ../scripts/validation/validate-ecommerce-legacy.sh`: exit 0.
+- `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh`: exit 0 on the default port.
+- `rtk bash -lc 'PORT=3017 bash ../scripts/validation/validate-ecommerce-legacy.sh'`: exit 0 on a configurable non-default port.
+- `rtk git diff --check`: exit 0 before final report append; the final post-report check is recorded in execution evidence and the handoff.
+- No listener remained on ports 3000 or 3017 after validation. A pre-existing `npm start`/`node src/server.js` process from before this rerun was observed without a listener on either validation port and was not terminated because it was not spawned by this run.
+
+### PHASE 3: REFACTORING COMPLETE
+
+The scoped corrective refactoring boots, preserves the endpoint contract, passes the assignment validator and finding-specific closure gate, and leaves only the documented LOW response-shape compatibility risk.

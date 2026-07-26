@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROJECT_DIR="$ROOT_DIR/ecommerce-api-legacy"
-PORT="3000"
+PORT="${PORT:-3000}"
 BASE_URL="http://127.0.0.1:$PORT"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ecommerce-api-legacy-validation.XXXXXX")"
 LOG_FILE="$TMP_DIR/application.log"
@@ -117,7 +117,14 @@ npm ls --depth=0
 node -e 'require("express"); require("sqlite3");'
 echo "Dependency installation and verification passed"
 
-ADMIN_TOKEN="$VALIDATION_ADMIN_TOKEN" npm start >"$LOG_FILE" 2>&1 &
+for configured_database_path in "" ":memory:"; do
+    if DATABASE_PATH="$configured_database_path" NODE_ENV=production node -e 'require("./src/config")' >/dev/null 2>&1; then
+        fail "production configuration accepted non-durable DATABASE_PATH='$configured_database_path'"
+    fi
+done
+echo "Production storage guard passed"
+
+ADMIN_TOKEN="$VALIDATION_ADMIN_TOKEN" PORT="$PORT" npm start >"$LOG_FILE" 2>&1 &
 APP_PID=$!
 
 ready=""
@@ -174,5 +181,104 @@ status="$(request DELETE /api/users/1 '' "$TMP_DIR/delete-user.body" "$VALIDATIO
 assert_status "authorized user deletion" "$status" "200"
 assert_body "authorized user deletion" "$TMP_DIR/delete-user.body" "Usuário deletado, mas as matrículas e pagamentos ficaram sujos no banco."
 echo "Legacy contract passed: authorized DELETE /api/users/1 -> 200 legacy text"
+
+node <<'NODE'
+const assert = require('node:assert/strict');
+const SqliteDatabase = require('./src/infrastructure/database');
+const initializeDatabase = require('./src/infrastructure/initializeDatabase');
+const CourseRepository = require('./src/repositories/courseRepository');
+const UserRepository = require('./src/repositories/userRepository');
+const CheckoutRepository = require('./src/repositories/checkoutRepository');
+const CheckoutService = require('./src/services/checkoutService');
+const CheckoutController = require('./src/controllers/checkoutController');
+
+async function count(db, table) {
+    const row = await db.get(`SELECT COUNT(*) AS count FROM ${table}`);
+    return row.count;
+}
+
+async function run() {
+    const db = new SqliteDatabase(':memory:');
+    try {
+        const checkoutSource = require('node:fs').readFileSync('./src/services/checkoutService.js', 'utf8');
+        assert.equal(checkoutSource.includes("startsWith('4')"), false);
+        assert.equal(checkoutSource.includes("'last_checkout_'"), false);
+        await initializeDatabase(db);
+        const cache = new Map();
+        const checkoutRepository = new CheckoutRepository(db);
+        const originalAudit = checkoutRepository.recordAudit.bind(checkoutRepository);
+        checkoutRepository.recordAudit = async () => {
+            throw new Error('injected failure after payment');
+        };
+        const service = new CheckoutService({
+            courseRepository: new CourseRepository(db),
+            userRepository: new UserRepository(db),
+            checkoutRepository,
+            cache,
+            transaction: db.transaction.bind(db)
+        });
+
+        await assert.rejects(
+            service.execute({
+                name: 'Rollback User',
+                email: 'rollback@example.com',
+                password: 'pass',
+                courseId: 2,
+                card: '4111222233334444'
+            }),
+            /injected failure after payment/
+        );
+        assert.equal(await count(db, 'users'), 1);
+        assert.equal(await count(db, 'enrollments'), 1);
+        assert.equal(await count(db, 'payments'), 1);
+        assert.equal(await count(db, 'audit_logs'), 0);
+        assert.equal(cache.size, 0);
+
+        checkoutRepository.recordAudit = originalAudit;
+        const result = await service.execute({
+            name: 'Committed User',
+            email: 'committed@example.com',
+            password: 'pass',
+            courseId: 2,
+            card: '4111222233334444'
+        });
+        assert.equal(result.msg, 'Sucesso');
+        assert.equal(await count(db, 'users'), 2);
+        assert.equal(await count(db, 'enrollments'), 2);
+        assert.equal(await count(db, 'payments'), 2);
+        assert.equal(await count(db, 'audit_logs'), 1);
+        const committedUser = await db.get('SELECT id FROM users WHERE email = ?', ['committed@example.com']);
+        assert.equal(cache.get(`last_checkout_${committedUser.id}`), 'Docker');
+
+        const controller = new CheckoutController({
+            execute: async () => { throw new Error('injected SQL detail'); }
+        });
+        let statusCode;
+        let body;
+        const response = {
+            status(code) { statusCode = code; return this; },
+            send(value) { body = value; return this; },
+            json(value) { body = value; return this; }
+        };
+        const originalConsoleError = console.error;
+        console.error = () => {};
+        try {
+            await controller.create({ body: { usr: 'Error', eml: 'error@example.com', pwd: 'pass', c_id: 2, card: '4' } }, response);
+        } finally {
+            console.error = originalConsoleError;
+        }
+        assert.equal(statusCode, 500);
+        assert.equal(body, 'Erro interno');
+    } finally {
+        await db.close();
+    }
+}
+
+run().catch(error => {
+    console.error(error);
+    process.exit(1);
+});
+NODE
+echo "Finding-specific validation passed: transaction rollback, post-commit cache, and generic error mapping"
 
 echo "ecommerce-api-legacy validation passed"

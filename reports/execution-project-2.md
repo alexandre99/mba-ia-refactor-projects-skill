@@ -1,5 +1,7 @@
 # Execution Evidence — ecommerce-api-legacy
 
+> Historical evidence: the prior Phase 1–3 execution remains preserved above. The rerun below follows the updated `refactor-arch` protocol and records only this project's current re-evaluation.
+
 ## Scope and gate
 
 - Requested scope: only Phases 1 and 2 of `refactor-arch`.
@@ -191,3 +193,134 @@ User deletion now fails closed with 401 unless X-Admin-Token matches the environ
 - No validation process or port-3000 listener remained.
 - Deliberate contract change: user deletion requires X-Admin-Token; authorized behavior remains 200 with the legacy text response.
 - Remaining risks and resolved findings are listed in the Phase 3 section above.
+
+## Updated protocol rerun — 2026-07-26
+
+### Scope and gate
+
+- Target: only `ecommerce-api-legacy`; no other application target is in scope.
+- Historical audit and execution evidence were retained in this file; current findings were generated from current source lines before corrections.
+- User authorization: the current request explicitly authorizes only necessary corrections for findings newly identified or still unresolved by the updated skill.
+
+### Phase 1 evidence
+
+| Command | Exit | Result |
+|---|---:|---|
+| `rtk node --version` | 0 | Node.js `v20.20.2` |
+| `rtk npm --version` | 0 | npm `10.8.2` |
+| `rtk npm ls --depth=0` | 0 | Express `4.22.1`, SQLite3 `5.1.7` |
+| `rtk rg --files -g '!node_modules' -g '!*.db' -g '!*.sqlite'` | 0 | Current source/configuration inventory completed; 20 `src/` JavaScript files |
+| `rtk nl -ba` over current `src/` files and validator | 0 | Exact current line evidence captured for stack, endpoints, boundaries, writes, cache, and validation |
+| `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Baseline boot, endpoint contract, auth behavior, and cleanup passed |
+| `rtk git diff --check` | 0 | No whitespace errors before application corrections |
+
+### Baseline endpoint results before corrections
+
+| Probe | Result |
+|---|---|
+| `POST /api/checkout` with `{}` | `400`, `Bad Request` |
+| `POST /api/checkout` with missing course | `404`, `Curso não encontrado` |
+| `POST /api/checkout` with denied card | `400`, `Pagamento recusado` |
+| Approved `POST /api/checkout` | `200`, JSON `{msg,enrollment_id}` |
+| `GET /api/admin/financial-report` | `200`, JSON array |
+| Unauthorized `DELETE /api/users/1` | `401`, `Unauthorized` |
+| Authorized `DELETE /api/users/1` | `200`, historical deletion text |
+
+### Current Phase 2 result before corrections
+
+- Current findings: 5.
+- Severity totals: HIGH 1, MEDIUM 2, LOW 2, CRITICAL 0.
+- Findings: `DATA-002`, `OPS-001`, `TEST-002`, `QUAL-002`, `QUAL-005`.
+- Historical findings independently rechecked: `SEC-002`, `SEC-003`, `SEC-004`, `ARCH-001`, `ARCH-002`, `ARCH-003`, `PERF-001`, and `TEST-001` are no longer observed in current reachable code; `QUAL-005` remains; `QUAL-002` is partially resolved.
+- `DATA-003` was assessed and not raised because the current cache update follows the final current database write; the correction still places it after the new aggregate commit.
+
+### Phase 2 inspected commands
+
+| Command | Exit | Result |
+|---|---:|---|
+| `rtk rg -n "router\\.(get|post|put|patch|delete)|app\\.(get|post|put|patch|delete)|listen\\(|process\\.env|cache|run\\(|get\\(|all\\(" src package.json ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Enumerated route, startup, configuration, persistence, and effect sites |
+| `rtk git rev-parse --show-toplevel` | 0 | Confirmed repository root and report locations |
+| `rtk git ls-files ../reports/audit-project-2.md ../reports/execution-project-2.md ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Confirmed project-2 report and validator artifacts are tracked |
+
+The updated audit was written to `../reports/audit-project-2.md` after this independent inspection, before application corrections. Manual-analysis comparison is recorded after consulting the repository manual section, below.
+
+### Manual-analysis comparison after current report
+
+| Command | Exit | Result |
+|---|---:|---|
+| `rtk sed -n '1,180p' ../README.md` | 0 | Read the manual Project 2 findings only after the updated independent report was complete. |
+
+Result: 1 of 8 manual findings was rediscovered in the current source (`DATA-002`, checkout without a transaction). Seven stale pre-refactor findings are no longer observed after the prior Phase 3. The current audit's `OPS-001`, `TEST-002`, `QUAL-002`, and `QUAL-005` were independently derived and were not copied from the manual table.
+
+## Updated protocol Phase 3 closure — 2026-07-26
+
+### Files changed in this corrective rerun
+
+- `ecommerce-api-legacy/src/app.js`
+- `ecommerce-api-legacy/src/config.js`
+- `ecommerce-api-legacy/src/constants.js`
+- `ecommerce-api-legacy/src/infrastructure/database.js`
+- `ecommerce-api-legacy/src/services/checkoutService.js`
+- `scripts/validation/validate-ecommerce-legacy.sh`
+- `reports/audit-project-2.md`
+- `reports/execution-project-2.md`
+- `.codex/napkin.md` (runbook directive only)
+
+No file under `code-smells-project/` or `task-manager-api/` was changed.
+
+### Transformation evidence
+
+1. `DATA-002`: `SqliteDatabase.transaction` now owns rollback, `CheckoutService` passes all related writes through that callback, and cache mutation occurs after successful commit.
+2. `OPS-001`: production configuration rejects missing or in-memory database paths; the documented non-production default remains disposable SQLite.
+3. `TEST-002`: the required validator now runs injected failure and success assertions against database row counts/cache state and checks generic unexpected-error mapping.
+4. `QUAL-002`: approved-card and cache-key policies moved to named constants; endpoint behavior is unchanged.
+5. `QUAL-005`: no response envelope was changed; the legacy divergence remains visible as a LOW partial disposition.
+
+### Post-correction commands and outcomes
+
+| Command | Exit | Outcome |
+|---|---:|---|
+| Node syntax checks over all `src/*.js` and nested JavaScript files | 0 | All current application files parsed. |
+| `rtk bash -n ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Validator syntax passed. |
+| `rtk bash ../scripts/validation/validate-ecommerce-legacy.sh` | 0 | Dependency install/verification, production storage guard, default-port boot, endpoint contracts, auth behavior, rollback/commit/cache/error probes, and cleanup passed. |
+| `rtk bash -lc 'PORT=3017 bash ../scripts/validation/validate-ecommerce-legacy.sh'` | 0 | Same complete validation passed on a configurable non-default port. |
+| `rtk rg -n "admin_master|senha_super|pk_live|badCrypto|class AppManager|startsWith\\('4'\\)" src` | 1 | No matches; exit 1 is the expected no-match result. |
+| `rtk rg -n "BEGIN TRANSACTION|COMMIT|ROLLBACK|transaction|CHECKOUT_POLICY" src` | 0 | Final transaction and policy boundaries present. |
+| `rtk git diff --check` | 0 | No whitespace errors before final report append; the final post-report check is recorded in the handoff. |
+
+### Final endpoint comparison
+
+| Endpoint/probe | Before | After | Contract result |
+|---|---|---|---|
+| Missing checkout payload | `400 Bad Request` | `400 Bad Request` | preserved |
+| Missing course | `404 Curso não encontrado` | `404 Curso não encontrado` | preserved |
+| Denied payment | `400 Pagamento recusado` | `400 Pagamento recusado` | preserved |
+| Approved checkout | `200` JSON `{msg,enrollment_id}` | `200` JSON `{msg,enrollment_id}` | preserved |
+| Financial report | `200` JSON array | `200` JSON array | preserved |
+| Unauthorized deletion | `401 Unauthorized` | `401 Unauthorized` | preserved from prior security correction |
+| Authorized deletion | `200` legacy text | `200` legacy text | preserved |
+
+### Final finding-disposition matrix
+
+| Finding | Disposition | Validation result | Remaining risk |
+|---|---|---|---|
+| `DATA-002` | `RESOLVED` | Injected failure rolled back users/enrollments/payments/audit and left cache empty; success committed rows/cache; validator exit 0. | None observed in this use case. |
+| `OPS-001` | `RESOLVED` | Production guard rejected empty and `:memory:` paths; normal/default and `PORT=3017` validator runs exited 0. | Durable path permissions are deployment-owned. |
+| `TEST-002` | `RESOLVED` | Finding-specific validator probe executed rollback, post-commit cache, generic error, and magic-value assertions; exit 0. | No process-crash simulation. |
+| `QUAL-002` | `RESOLVED` | Static service-literal assertions and approved/denied endpoint probes passed; exit 0. | None for audited literals. |
+| `QUAL-005` | `PARTIALLY_RESOLVED` | All legacy statuses/body shapes passed; response media/body divergence intentionally remains. | Compatibility requires multiple response conventions. |
+
+The final matrix contains every current Phase 2 finding exactly once. No CRITICAL or HIGH finding remains partial or unaddressed. No intentional contract change was introduced in this rerun; the prior `DELETE` token requirement remains documented historical behavior.
+
+### Cleanup and remaining risks
+
+- The validator's own spawned process and temporary directory were cleaned on both successful runs; ports 3000 and 3017 had no listener afterward.
+- A pre-existing `npm start`/`node src/server.js` process was observed with start time before this rerun. It had no listener on either validation port and was left untouched because it was not spawned by this run.
+- `npm ci` reports 13 dependency audit warnings (2 low, 4 moderate, 6 high, 1 critical); no `DEP-001` finding was raised because repository evidence does not identify a deprecated application API or authoritative replacement use.
+- The public financial report and in-memory development default remain documented scope/compatibility risks; the production default now fails closed.
+
+### Final state
+
+- `PHASE 1: PROJECT ANALYSIS`: completed for current source.
+- `PHASE 2: ARCHITECTURE AUDIT COMPLETE`: completed with 5 current findings and 1/8 manual rediscovery.
+- `PHASE 3: REFACTORING COMPLETE`: completed for scoped corrections; validator and finding-closure gate passed.

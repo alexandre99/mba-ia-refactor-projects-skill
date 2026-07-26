@@ -19,5 +19,5 @@
    Do instead: write only audit/evidence artifacts and stop at the Phase 3 approval gate.
 
 ## User Directives
-1. **[2026-07-21] Run only Fases 1 e 2 independently for ecommerce-api-legacy**
-   Do instead: generate the two project-2 reports, run baseline when possible, and request explicit Phase 3 approval.
+1. **[2026-07-26] Reevaluate the prior Phase 3 using the updated refactor-arch protocol**
+   Do instead: preserve historical evidence, correct only newly identified unresolved findings, update project-2 reports, and validate this project without touching other targets.

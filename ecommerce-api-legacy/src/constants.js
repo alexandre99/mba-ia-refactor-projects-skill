@@ -11,4 +11,9 @@ const MESSAGES = {
     USER_DELETED: 'Usuário deletado, mas as matrículas e pagamentos ficaram sujos no banco.'
 };
 
-module.exports = { PAYMENT_STATUS, MESSAGES };
+const CHECKOUT_POLICY = {
+    APPROVED_CARD_PREFIX: '4',
+    CACHE_KEY_PREFIX: 'last_checkout_'
+};
+
+module.exports = { PAYMENT_STATUS, MESSAGES, CHECKOUT_POLICY };
