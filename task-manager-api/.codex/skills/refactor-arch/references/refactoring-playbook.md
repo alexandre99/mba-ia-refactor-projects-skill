@@ -24,7 +24,9 @@ After: blueprints/routers per domain registered by the application factory.
 
 Before: controller validates stock, calculates totals, updates several tables, and emits notifications.
 
-After: controller parses input; service owns the workflow and transaction; repository owns queries.
+After: controller parses input; service owns the workflow and explicit transaction boundary; repository owns queries.
+
+Moving a workflow into a service does not resolve missing atomicity. When related writes form one business operation, the service or a dedicated unit-of-work boundary must own commit and rollback.
 
 ## T-005 — Extract reusable validation
 
@@ -52,9 +54,9 @@ After: expected domain/application errors map centrally; unexpected exceptions a
 
 ## T-009 — Isolate external effects
 
-Before: handlers print simulated email/SMS/push actions.
+Before: handlers print simulated email/SMS/push actions or update cache before durable state is confirmed.
 
-After: notifier interface/service invoked after successful business state transition; test double used in validation.
+After: notifier/cache/publication boundary is invoked only after successful commit, or through an outbox/idempotent mechanism with explicit validation.
 
 ## T-010 — Introduce behavioral smoke tests
 
@@ -62,9 +64,26 @@ Before: architecture is changed without an executable contract.
 
 After: deterministic boot and endpoint checks run before and after changes, with intentional differences documented.
 
+## T-011 — Introduce transactional unit of work
+
+Before: one use case performs multiple related writes sequentially; partial failure leaves committed intermediate state.
+
+After: the use case executes related writes inside an explicit transaction or unit of work. Commit happens only after all writes succeed; any failure triggers rollback.
+
+Required proof: inject or trigger an intermediate failure and verify no partial database state or post-commit external effect remains.
+
+## T-012 — Add finding-specific regression validation
+
+Before: only the successful HTTP path is tested, so the original audited defect can remain undetected.
+
+After: each security, consistency, transaction, error-handling, or performance finding has an executable check capable of detecting its original root cause.
+
 ## Transformation safeguards
 
 - First move behavior without changing it; then correct security defects explicitly.
 - Avoid changing response envelopes during extraction.
 - Preserve transaction boundaries or strengthen them intentionally.
+- Keep external effects after commit unless an explicit consistency mechanism replaces that order.
+- Do not mark a finding resolved merely because code moved into a more appropriate folder.
+- Re-run finding-specific validation before assigning the final disposition.
 - Keep each commit focused on one target project or one shared skill concern.

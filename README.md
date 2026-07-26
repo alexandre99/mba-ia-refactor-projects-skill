@@ -1,6 +1,6 @@
 # Refatoração Arquitetural Automatizada com OpenAI Codex
 
-Projeto acadêmico para criação e validação da Custom Skill `refactor-arch`. A entrega só será considerada concluída quando a mesma skill executar as três fases nos três projetos, produzir os relatórios, modificar o código após aprovação humana e registrar validação real de boot e endpoints.
+Projeto acadêmico para criação e validação da Custom Skill `refactor-arch`. A entrega só será considerada concluída quando a mesma skill executar as três fases nos três projetos, produzir os relatórios, modificar o código após aprovação humana e registrar validação real de boot, endpoints e fechamento dos findings.
 
 ## Ferramenta escolhida
 
@@ -54,7 +54,7 @@ Esta seção foi produzida antes da execução da skill, como exige o enunciado.
 
 ## Construção da Skill
 
-A skill usa um `SKILL.md` como orquestrador e seis referências especializadas:
+A skill usa um `SKILL.md` como orquestrador e sete referências especializadas:
 
 ```text
 .codex/skills/refactor-arch/
@@ -65,7 +65,8 @@ A skill usa um `SKILL.md` como orquestrador e seis referências especializadas:
     ├── audit-report-template.md
     ├── mvc-guidelines.md
     ├── refactoring-playbook.md
-    └── validation-playbook.md
+    ├── validation-playbook.md
+    └── finding-resolution.md
 ```
 
 ### Decisões de design
@@ -74,13 +75,16 @@ A skill usa um `SKILL.md` como orquestrador e seis referências especializadas:
 2. Nenhum arquivo da aplicação pode ser alterado nas Fases 1 e 2.
 3. A Fase 2 exige confirmação humana explícita na mesma sessão.
 4. A skill não pode copiar os findings desta análise manual; a comparação ocorre somente depois do relatório independente.
-5. Todo finding exige severidade, regra, arquivo, linhas, evidência, impacto e recomendação.
+5. Todo finding exige severidade, regra, arquivo, linhas, evidência, impacto, recomendação e validação capaz de detectar a causa raiz.
 6. O alvo é MVC pragmático: routes/views tratam HTTP, controllers orquestram, services executam workflows, models representam dados e repositories isolam persistência.
 7. Projetos parcialmente organizados devem preservar fronteiras úteis, evitando reescrita artificial.
 8. Boot e endpoints precisam ser realmente executados; ausência de runtime é bloqueio, não sucesso.
 9. Cada execução produz um relatório de auditoria e um arquivo de evidências com comandos, resultados e desvios contratuais.
+10. Mover código para uma camada melhor não resolve automaticamente um finding; a causa raiz precisa ser removida e validada.
+11. Fluxos com múltiplas escritas relacionadas exigem análise explícita de transação, rollback e efeitos externos após commit.
+12. A Fase 3 só pode ser concluída após uma matriz de disposition para todos os findings.
 
-O catálogo contém mais de oito anti-patterns com severidades distribuídas, incluindo execução arbitrária, segredos hardcoded, password handling inseguro, God Class, fat controllers, N+1, duplicação, exceções genéricas e APIs deprecated. O playbook contém mais de oito transformações com exemplos antes/depois.
+O catálogo contém anti-patterns com severidades distribuídas, incluindo execução arbitrária, segredos hardcoded, password handling inseguro, God Class, fat controllers, transação ausente, efeitos externos antes do commit, N+1, duplicação, exceções genéricas, falta de safety net e APIs deprecated. O playbook contém transformações com exemplos antes/depois e critérios de prova.
 
 ## Protocolo de Execução e Validação
 
@@ -95,9 +99,10 @@ Para cada projeto:
 5. revisar o relatório gerado e registrar quantos achados manuais foram redescobertos;
 6. responder `y` ao gate na mesma sessão;
 7. deixar a skill executar a Fase 3;
-8. exigir boot, validação de endpoints e comparação antes/depois;
-9. revisar `reports/audit-project-N.md` e `reports/execution-project-N.md`;
-10. commitar o resultado daquele projeto separadamente.
+8. exigir boot, validação de endpoints, testes negativos/failure-path e comparação antes/depois;
+9. revisar a matriz de disposition e impedir conclusão falsa de findings;
+10. revisar `reports/audit-project-N.md` e `reports/execution-project-N.md`;
+11. commitar o resultado daquele projeto separadamente.
 
 ### Comando de entrada
 
@@ -119,10 +124,20 @@ Repetir em `ecommerce-api-legacy` e `task-manager-api`. Após revisar o relatór
 - estrutura MVC adequada ao contexto;
 - configuração extraída;
 - error handling centralizado;
+- transações e efeitos externos avaliados quando houver múltiplas escritas;
 - application boot aprovado;
 - endpoints originais exercitados;
+- validações negativas específicas executadas para segurança, rollback e erros;
 - mudanças contratuais de segurança documentadas;
+- matriz final contendo todos os findings e disposições válidas;
+- nenhum CRITICAL/HIGH parcialmente resolvido ou não tratado sem aprovação explícita;
 - relatório e evidências gerados pela execução da skill.
+
+## Evolução orientada por evidências
+
+A execução real do Projeto 2 revelou uma lacuna de protocolo: a separação MVC e o smoke test poderiam passar enquanto um risco de consistência transacional permanecia. A skill foi fortalecida para exigir regra própria de atomicidade, testes de falha/rollback e fechamento formal de findings. Essa evolução é uma decisão de Staff/Skill Designer baseada em evidência da execução, não um finding copiado da análise manual durante a auditoria.
+
+Após esta atualização, as três cópias da skill devem permanecer idênticas. O Projeto 2 deve ser reavaliado pela versão consolidada antes do Projeto 3. Projetos já executados podem ser revalidados pela matriz de disposition sem apagar a evidência histórica da versão anterior.
 
 ## Estado Atual
 
@@ -130,17 +145,19 @@ Repetir em `ecommerce-api-legacy` e `task-manager-api`. Após revisar o relatór
 - [x] skill e referências iniciais;
 - [x] skill copiada para os três projetos;
 - [x] protocolo de integridade e evidência incorporado ao `SKILL.md`;
+- [x] protocolo de fechamento de findings, transações e validação negativa incorporado;
 - [x] refatorações manuais removidas;
 - [x] relatórios não executados removidos;
-- [ ] referências das três cópias verificadas como idênticas;
+- [ ] referências das três cópias verificadas como idênticas após a revisão;
+- [ ] Projeto 2 reavaliado e corrigido com a versão consolidada;
 - [ ] Fases 1 e 2 executadas pelo Codex nos três projetos;
 - [ ] Fase 3 executada pela skill nos três projetos;
-- [ ] boot e endpoints validados nos três projetos;
+- [ ] boot, endpoints e finding-specific validations aprovados nos três projetos;
 - [ ] relatórios, logs e comparação antes/depois incorporados ao README.
 
 ## Resultados
 
-Esta seção permanecerá pendente até a execução real da skill. Não há contagens finais, validação aprovada ou screenshots declaradas antes dessa etapa.
+Os resultados finais devem refletir apenas execuções reais. Relatórios históricos podem registrar a evolução da skill, mas a entrega final precisa usar a versão consolidada e indicar os findings resolvidos, parcialmente resolvidos, aceitos ou não tratados.
 
 Os arquivos esperados ao final são:
 

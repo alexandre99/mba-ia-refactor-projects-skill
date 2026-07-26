@@ -44,6 +44,22 @@ Signals: plaintext storage/comparison, reversible password encryption, password 
 
 Signals: debug mode enabled by default, broad CORS without rationale, development server used as production contract, fixed sensitive configuration.
 
+### DATA-002 — Missing atomic transaction boundary
+
+Signals: one use case performs two or more related writes without explicit atomic ownership; a later failure can leave earlier writes committed; rollback behavior is absent or unproven.
+
+Impact: partial business state, orphaned records, duplicate retry effects, or inconsistent aggregates.
+
+Resolution criteria: all related writes execute inside one transaction or an explicitly documented equivalent consistency mechanism; any intermediate failure reverses the state; a failure-path validation proves rollback.
+
+### DATA-003 — External effect before durable commit
+
+Signals: cache update, notification, message publication, file write, or external API call occurs before the database state is durably committed, without an outbox or compensation strategy.
+
+Impact: clients or downstream systems can observe effects for state that later rolls back or never commits.
+
+Resolution criteria: the effect occurs after commit, or an outbox/idempotent consistency mechanism is implemented and validated.
+
 ## MEDIUM
 
 ### DATA-001 — Dynamic query construction
@@ -70,6 +86,12 @@ Signals: APIs marked deprecated by the framework/library version, removed migrat
 
 Signals: no tests or smoke validation for startup and representative endpoints before structural changes.
 
+### TEST-002 — Missing finding-specific failure validation
+
+Signals: validation covers only successful behavior and cannot detect whether a security, authorization, rollback, error-handling, or external-effect finding remains.
+
+Impact: a refactor can pass endpoint smoke tests while the audited root cause remains unresolved.
+
 ## LOW
 
 ### QUAL-002 — Magic values and scattered constants
@@ -91,3 +113,5 @@ Signals: repeated but divergent success/error envelopes and status mapping witho
 ## Severity adjustment
 
 Raise severity when the code is reachable, externally controllable, destructive, or repeated across domains. Lower severity only when evidence proves the code is unreachable, test-only, or safely constrained. Explain every adjustment.
+
+Do not merge DATA-002 into a generic architecture finding when atomicity is independently actionable. Moving writes from a controller to a service resolves transport coupling but does not resolve missing transaction ownership.
