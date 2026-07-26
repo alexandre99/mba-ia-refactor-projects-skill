@@ -5,7 +5,8 @@
 - Stack: Node.js `v20.20.2`, npm `10.8.2`, Express `4.22.1`, SQLite3 `5.1.7`
 - Database: SQLite in-memory (`:memory:`)
 - Domain: LMS/e-commerce de cursos, checkout, matrículas, pagamentos e relatório financeiro
-- Source files analyzed: 3 (`src/app.js`, `src/AppManager.js`, `src/utils.js`)
+- Pre-refactor source files analyzed: 3 (src/app.js, src/AppManager.js, src/utils.js).
+- Post-refactor source files: 20, organized under composition, routes, controllers, services, repositories, infrastructure, security, and configuration.
 - Public endpoints: 3 declarados (`POST /api/checkout`, `GET /api/admin/financial-report`, `DELETE /api/users/:id`)
 - Baseline status: PASSED; the corrected safety-net script booted the process and validated the legacy endpoint contracts without depending on `GET /`
 
@@ -13,7 +14,7 @@
 
 CRITICAL: 2 | HIGH: 4 | MEDIUM: 2 | LOW: 2
 
-The current implementation exposes destructive administration without authorization, commits production-looking credentials, and stores passwords through a non-cryptographic routine. The same `AppManager` class combines database setup, route declaration, HTTP parsing, business workflows, persistence, reporting, and deletion. The first refactoring order should isolate configuration/secrets and authorization, then extract use cases and repositories while preserving the observed route contracts. The corrected safety net now passes the legacy behavioral baseline; the remaining risks are in the application itself.
+The pre-refactor implementation exposed destructive administration without authorization, committed production-looking credentials, stored passwords through a non-cryptographic routine, and coupled all use cases in AppManager. Phase 3 extracted MVC-oriented boundaries, removed committed secrets, added password hashing and fail-closed admin authorization, and preserved the tested checkout/report contracts. The remaining risks are documented in the Phase 3 disposition.
 
 This report was produced from the current source and configuration files before consulting the repository's manual Project 2 analysis. Findings are facts observed in the cited lines; impacts and recommendations are architectural/security inferences from those facts.
 
@@ -114,6 +115,20 @@ This report was produced from the current source and configuration files before 
 - `DELETE /api/users/:id` returns success regardless of the database callback error and explicitly leaves related records; any correction must define whether deletion is restricted, transactional, or removed.
 - The database is in-memory and seeded at startup, so endpoint observations are disposable and do not establish production persistence behavior.
 
+## Phase 3 disposition
+
+- Approval: explicit user response y was received before application changes.
+- SEC-002 resolved: DELETE /api/users/:id now passes through middleware at src/routes.js:4-10 and src/middleware/adminAuth.js:1-8; missing or unconfigured tokens return 401, while the authorized path preserves the legacy 200 text response.
+- SEC-003 resolved: committed credential/payment-key literals and checkout key logging were removed. Runtime settings now come from src/config.js:1-6.
+- SEC-004 resolved: new users are stored with scrypt-derived password hashes in src/security/passwordHasher.js:3-15; the plaintext seed/fallback password was removed.
+- ARCH-001, ARCH-002, and ARCH-003 resolved: src/app.js:17-40 is the composition root; HTTP wiring is in src/routes.js; controllers orchestrate transport; services own workflows; repositories own SQL.
+- PERF-001 resolved: src/repositories/reportRepository.js:6-20 uses one join query, and src/services/reportService.js:8-34 maps the result to the preserved array shape.
+- TEST-001 resolved: the validator passed dependency installation, boot, endpoint contracts, authorization behavior, and cleanup with exit 0.
+- QUAL-002 resolved through src/constants.js and environment-backed src/config.js.
+- QUAL-005 remains intentionally constrained by compatibility: plain-text error/deletion responses and JSON success/report responses are centrally mapped by controllers but retain their legacy shapes.
+- Remaining risks: the financial report remains reachable without authorization; checkout writes are sequential without an explicit transaction; the database defaults to in-memory storage; and the project still has no unit-test script beyond the executable validation safety net.
+
 ## Approval gate
 
-Proceed with Phase 3 refactoring? [y/n]
+- Approval received: y.
+- Phase 3 refactoring completed and post-refactor validation passed.

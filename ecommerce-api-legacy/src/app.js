@@ -1,14 +1,43 @@
 const express = require('express');
-const AppManager = require('./AppManager');
-const { config } = require('./utils');
+const config = require('./config');
+const SqliteDatabase = require('./infrastructure/database');
+const initializeDatabase = require('./infrastructure/initializeDatabase');
+const CourseRepository = require('./repositories/courseRepository');
+const UserRepository = require('./repositories/userRepository');
+const CheckoutRepository = require('./repositories/checkoutRepository');
+const ReportRepository = require('./repositories/reportRepository');
+const CheckoutService = require('./services/checkoutService');
+const ReportService = require('./services/reportService');
+const UserService = require('./services/userService');
+const CheckoutController = require('./controllers/checkoutController');
+const ReportController = require('./controllers/reportController');
+const UserController = require('./controllers/userController');
+const createRoutes = require('./routes');
 
-const app = express();
-app.use(express.json());
+async function createApp({ database } = {}) {
+    const db = database || new SqliteDatabase(config.databasePath);
+    await initializeDatabase(db);
 
-const manager = new AppManager();
-manager.initDb();
-manager.setupRoutes(app);
+    const userRepository = new UserRepository(db);
+    const checkoutService = new CheckoutService({
+        courseRepository: new CourseRepository(db),
+        userRepository,
+        checkoutRepository: new CheckoutRepository(db),
+        cache: new Map()
+    });
+    const reportService = new ReportService(new ReportRepository(db));
+    const userService = new UserService(userRepository);
 
-app.listen(config.port, () => {
-    console.log(`Frankenstein LMS rodando na porta ${config.port}...`);
-});
+    const app = express();
+    app.use(express.json());
+    app.use(createRoutes({
+        checkoutController: new CheckoutController(checkoutService),
+        reportController: new ReportController(reportService),
+        userController: new UserController(userService),
+        adminToken: config.adminToken
+    }));
+    app.locals.database = db;
+    return { app, db };
+}
+
+module.exports = createApp;

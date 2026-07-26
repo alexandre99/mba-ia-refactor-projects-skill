@@ -3,9 +3,10 @@
 ## Scope and gate
 
 - Requested scope: only Phases 1 and 2 of `refactor-arch`.
-- Application source/configuration was not edited.
-- The validation safety net was corrected before the gate; Phase 3 was not executed.
-- Final gate: `Proceed with Phase 3 refactoring? [y/n]`
+- Before approval, application source/configuration was not edited.
+- Approval response: y.
+- Phase 3 then changed the application architecture and deliberately protected user deletion with an admin token.
+- Approval gate response: y; Phase 3 proceeded and completed.
 
 ## Phase 1 — project analysis
 
@@ -129,11 +130,64 @@ Comparison result: 8 manual findings; 6/8 rediscovered semantically (5 integral,
 
 ## Integrity, limitations, and deviations
 
-- No application file under `ecommerce-api-legacy/src` was edited. This task changed the validation script and the two Project 2 reports; pre-existing modifications under `.codex/skills/refactor-arch/references/` and the sibling target's skill references were preserved.
-- The corrected validator runs `npm ci`, verifies the dependency tree and module loading, starts the fixed-port app, exercises the contract matrix, and cleans up. Its npm audit warnings are recorded, not converted into a `DEP-001` finding without source/API migration evidence.
+- Phase 3 intentionally changed application files under `ecommerce-api-legacy/src`; no unrelated target project was changed. The validation script and both Project 2 reports were also updated as requested; pre-existing skill-reference modifications were preserved.
+- The corrected validator runs `npm ci`, verifies the dependency tree and module loading, starts the fixed-port app with a validation admin token, exercises the contract matrix including unauthorized/authorized deletion, and cleans up. Its npm audit warnings remain recorded, not converted into a DEP-001 finding without source/API migration evidence.
 - The validator still uses the application's fixed port and in-memory database, so it proves current boot/HTTP behavior but not durable production persistence. It no longer depends on undeclared `GET /`; the readiness route is existing `GET /api/admin/financial-report`.
 - The direct endpoint probe intentionally did not test arbitrary SQL/DDL because no such endpoint exists in the current source and destructive experiments were out of scope.
-- Because the current app has no authentication route/middleware, authorization behavior for future protected administration was not testable; the unauthenticated reachability of the delete route was observed.
+- Before Phase 3, the app had no authentication route or middleware; after refactoring, token middleware protects deletion while the report remains intentionally public for contract compatibility.
 - Transient `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` errors occurred during some sandbox read/patch attempts; they caused no application or report-content change. Successful read/write operations were retried and their exit outcomes are recorded above.
 
+## Phase 3 — Refactoring
+
+### Approval and transformation
+
+- Explicit approval: y.
+- Composition root/server split: src/app.js now builds the app and dependencies; src/server.js owns listen and SIGINT/SIGTERM shutdown.
+- MVC boundaries: src/routes.js and controllers handle HTTP mapping; services own checkout/report workflows; repositories own SQLite queries; infrastructure owns the database adapter and seed initialization.
+- Security/configuration: src/config.js reads environment-backed settings; committed credential literals and payment-key logging were removed; new passwords use scrypt hashing; DELETE /api/users/:id now requires X-Admin-Token.
+- Reporting: the callback/query-in-loop implementation was replaced with one repository join and a service mapper while retaining the financial-report array shape.
+
+### Post-refactor validation commands and exit codes
+
+| Command or check | Exit | Result |
+|---|---:|---|
+| node syntax checks for all 20 src JavaScript files | 0 | All files parsed successfully. |
+| rtk bash -n ../scripts/validation/validate-ecommerce-legacy.sh | 0 | Validation script syntax passed. |
+| npm ci, npm ls --depth=0, and module loading inside validator | 0 | Dependencies installed and verified: express 4.22.1, sqlite3 5.1.7. |
+| rtk bash ../scripts/validation/validate-ecommerce-legacy.sh | 0 | Full post-refactor boot, readiness, endpoint matrix, authorization checks, and cleanup passed. |
+| rtk ss -ltnp after validation | 0 | No listener remained on port 3000. |
+| process search for npm start/src/server.js after validation | 0 | No validation process remained. |
+| rtk git diff --check | 0 | No whitespace errors. |
+| rtk git status --short --untracked-files=all | 0 | Only the approved app, validator, and Project 2 report changes are present. |
+
+### Post-refactor contract matrix
+
+| Endpoint/probe | Result |
+|---|---|
+| POST /api/checkout with {} | 400 Bad Request |
+| POST /api/checkout with nonexistent course | 404 Curso não encontrado |
+| POST /api/checkout with denied card | 400 Pagamento recusado |
+| POST /api/checkout approved | 200 JSON containing msg and enrollment_id |
+| GET /api/admin/financial-report | 200 JSON array |
+| DELETE /api/users/1 without X-Admin-Token | 401 Unauthorized |
+| DELETE /api/users/1 with validation token | 200 legacy deletion text |
+
+### Findings disposition
+
+Resolved: SEC-002, SEC-003, SEC-004, ARCH-001, ARCH-002, ARCH-003, PERF-001, TEST-001, and QUAL-002.
+
+Remaining: QUAL-005 remains intentionally for legacy response-shape divergence; the financial report is still unauthenticated; checkout writes are sequential without an explicit transaction; storage remains in-memory by default; and no unit-test script was added beyond the executable validator.
+
+### Intentional contract change
+
+User deletion now fails closed with 401 unless X-Admin-Token matches the environment-provided ADMIN_TOKEN. The authorized route preserves the former 200 status and response text. The validator proves both paths, and the audit records this as the deliberate security change.
+
 ## Final state
+
+- PHASE 1: PROJECT ANALYSIS completed.
+- PHASE 2: ARCHITECTURE AUDIT COMPLETE completed.
+- Phase 3 refactoring completed after explicit approval y.
+- Post-refactor validator passed with exit 0.
+- No validation process or port-3000 listener remained.
+- Deliberate contract change: user deletion requires X-Admin-Token; authorized behavior remains 200 with the legacy text response.
+- Remaining risks and resolved findings are listed in the Phase 3 section above.

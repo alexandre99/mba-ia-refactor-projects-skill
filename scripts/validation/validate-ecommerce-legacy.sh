@@ -7,6 +7,7 @@ PORT="3000"
 BASE_URL="http://127.0.0.1:$PORT"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ecommerce-api-legacy-validation.XXXXXX")"
 LOG_FILE="$TMP_DIR/application.log"
+VALIDATION_ADMIN_TOKEN="validation-admin-token"
 APP_PID=""
 
 cleanup() {
@@ -77,12 +78,19 @@ request() {
     local path="$2"
     local body="$3"
     local output_file="$4"
+    local admin_token="${5:-}"
     local http_code
+    local -a auth_header=()
+
+    if [[ -n "$admin_token" ]]; then
+        auth_header=(-H "X-Admin-Token: $admin_token")
+    fi
 
     if ! http_code="$(curl -sS --max-time 5 \
         -X "$method" \
         "$BASE_URL$path" \
         -H 'Content-Type: application/json' \
+        "${auth_header[@]}" \
         --data "$body" \
         -o "$output_file" \
         -w '%{http_code}')"; then
@@ -109,7 +117,7 @@ npm ls --depth=0
 node -e 'require("express"); require("sqlite3");'
 echo "Dependency installation and verification passed"
 
-npm start >"$LOG_FILE" 2>&1 &
+ADMIN_TOKEN="$VALIDATION_ADMIN_TOKEN" npm start >"$LOG_FILE" 2>&1 &
 APP_PID=$!
 
 ready=""
@@ -157,9 +165,14 @@ assert_status "financial report" "$status" "200"
 assert_json_array "financial report" "$TMP_DIR/financial-report.body"
 echo "Legacy contract passed: financial report -> 200 JSON array"
 
-status="$(request DELETE /api/users/1 '' "$TMP_DIR/delete-user.body")"
-assert_status "user deletion" "$status" "200"
-assert_body "user deletion" "$TMP_DIR/delete-user.body" "Usuário deletado, mas as matrículas e pagamentos ficaram sujos no banco."
-echo "Legacy contract passed: DELETE /api/users/1 -> 200 legacy text"
+status="$(request DELETE /api/users/1 '' "$TMP_DIR/delete-user-unauthorized.body")"
+assert_status "unauthorized user deletion" "$status" "401"
+assert_body "unauthorized user deletion" "$TMP_DIR/delete-user-unauthorized.body" "Unauthorized"
+echo "Security contract passed: DELETE /api/users/1 without token -> 401"
+
+status="$(request DELETE /api/users/1 '' "$TMP_DIR/delete-user.body" "$VALIDATION_ADMIN_TOKEN")"
+assert_status "authorized user deletion" "$status" "200"
+assert_body "authorized user deletion" "$TMP_DIR/delete-user.body" "Usuário deletado, mas as matrículas e pagamentos ficaram sujos no banco."
+echo "Legacy contract passed: authorized DELETE /api/users/1 -> 200 legacy text"
 
 echo "ecommerce-api-legacy validation passed"
