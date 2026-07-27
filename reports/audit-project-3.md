@@ -1,150 +1,214 @@
-# Architecture Audit Report — Project 3 (`ecommerce-api-legacy`)
+# Architecture Audit Report — task-manager-api
+
+## Scope and independence
+
+This report was produced from the current `task-manager-api` source, dependency file, validation scripts, and runtime probes. The findings were derived independently from source inspection; the README was consulted only after the findings were complete for a rediscovery comparison. `ecommerce-api-legacy` was not analyzed.
 
 ## Project profile
 
-- Stack: Node.js 20.20.2, Express 4.22.1 installed (declared `^4.18.2`), npm 10.8.2
-- Database: SQLite via `sqlite3` 5.1.7 installed (declared `^5.1.6`); `:memory:` by default in development and a configured file in production
-- Domain: LMS course enrollment and checkout, including payment records, financial reporting, and administrative user deletion
-- Source files analyzed: 20 files under `src/`
-- Public endpoints: 3 routes
-- Baseline status: boot and representative probes passed; no repository validation script or `npm test` command is available
+- Project: `task-manager-api`
+- Stack: Python 3.12.3, Flask 3.0.0, Flask-SQLAlchemy 3.1.1, Flask-CORS 4.0.0
+- Installed validation dependencies: SQLAlchemy 2.0.51, Requests 2.31.0, Marshmallow 3.20.1, python-dotenv 1.0.0
+- Database: SQLite, configured as `sqlite:///tasks.db` and materialized under Flask's instance path
+- Domain: task management with users, roles, tasks, categories, login, and productivity reports
+- Application source files analyzed: 15 Python files
+- Public endpoints: 22
+- Baseline status: PASSED with an isolated temporary copy/database and the deterministic validator; the pre-existing repository validator failed before boot because `python` is unavailable in the environment
 
 ## Executive summary
 
-CRITICAL: 1 | HIGH: 2 | MEDIUM: 3 | LOW: 1
+CRITICAL: 1 | HIGH: 6 | MEDIUM: 3 | LOW: 1
 
-The current code has useful route/controller/service/repository boundaries, checkout writes are wrapped in a database transaction, password creation uses scrypt, and the checkout cache is updated after the transaction. The main risks are an unauthenticated administrative report, orphaned enrollment/payment state after user deletion, and a non-idempotent production bootstrap that fails on restart and seeds demo data into durable storage.
+The most urgent risks are unauthenticated destructive operations, insecure password handling, committed credentials, and unsafe runtime defaults. The route modules also combine HTTP parsing, validation, business calculations, persistence, and response mapping. Phase 3 should address security and configuration first, then introduce thin controllers/services/repositories while preserving the current HTTP contract, and finally remove query/validation duplication and make seed writes atomic.
 
-## Endpoint contract inventory
+## Phase 1 architecture map
 
-| Method | Path | Handler | Input | Observed success | Response shape |
-|---|---|---|---|---|---|
-| POST | `/api/checkout` | `CheckoutController.create` | JSON `usr`, `eml`, `pwd`, `c_id`, `card` | `200` | JSON `{ msg, enrollment_id }` |
-| GET | `/api/admin/financial-report` | `ReportController.financialReport` | none | `200` | JSON array of `{ course, revenue, students[] }` |
-| DELETE | `/api/users/:id` | `UserController.delete` | path `id`, `x-admin-token` header | `200` | text message |
+| Area | Observed responsibility |
+|---|---|
+| `app.py:1-34` | Flask bootstrap, fixed configuration, CORS, extension initialization, blueprint registration, schema creation at import time, health/root routes, and development-server startup |
+| `routes/task_routes.py:1-299` | Task HTTP routes, input validation, ORM queries, task serialization, overdue calculations, search, statistics, commits, rollbacks, and console output |
+| `routes/user_routes.py:1-211` | User HTTP routes, validation, ORM queries, password workflow, cascading task deletion, commits, rollbacks, and login response mapping |
+| `routes/report_routes.py:1-223` | Report calculations plus category CRUD, ORM queries, validation, commits, rollbacks, and response mapping |
+| `models/*.py` | SQLAlchemy entities, serialization, password hashing/checking, and local task rules |
+| `database.py:1-3` | Global SQLAlchemy extension object |
+| `services/notification_service.py:1-48` | SMTP configuration and email/in-memory notification behavior; no application reference was found in the analyzed runtime paths |
+| `utils/helpers.py:1-116` | Date, email, string, task-data helpers, and scattered validation constants; `process_task_data` is not referenced by the routes |
+| `seed.py:1-99` | Destructive seed reset plus user/category/task inserts with three separate commits |
 
-## Phase 1 — Project analysis
+## Endpoint inventory
 
-- Runtime/package manager: Node.js and npm.
-- Framework: Express, constructed in `src/app.js:1,32-39`.
-- Database: SQLite wrapper in `src/infrastructure/database.js:1-60`.
-- Startup: `npm start` → `node src/server.js`, declared in `package.json:6-8`.
-- Configuration: `src/config.js:1-12`; `PORT`, `DATABASE_PATH`, `NODE_ENV`, and `ADMIN_TOKEN` are environment-backed.
-- Composition root: `src/app.js:17-44` wires database, repositories, services, controllers, and routes.
-- Server entrypoint: `src/server.js:1-31` starts listening and closes the database on signals.
-- Routes/controllers: `src/routes.js:1-15` and `src/controllers/*.js` handle HTTP transport and response mapping.
-- Services: checkout workflow in `src/services/checkoutService.js:5-46`; report aggregation in `src/services/reportService.js:3-34`; user deletion delegation in `src/services/userService.js:3-11`.
-- Repositories: SQL and persistence mapping in `src/repositories/*.js`.
-- Domain: LMS users, courses, enrollments, payments, audit logs, checkout, and financial reporting.
-- Validation availability: no `scripts/validation/` directory, no test files, and no `test` script. Executed `npm test` failed with `Missing script: "test"`.
+The following inventory was derived from route decorators and verified against the isolated HTTP baseline. JSON shapes show representative top-level keys or array item keys.
 
-The checkout workflow finds an active course, evaluates the card prefix, creates or reuses a user, writes enrollment/payment/audit rows inside `db.transaction` at `src/services/checkoutService.js:28-42`, then updates the cache at lines 44-45. User deletion currently removes only the user row while its response acknowledges that related records remain dirty.
-
-### Baseline evidence
-
-The application was booted on port `4317` with `DATABASE_PATH=:memory:` and `ADMIN_TOKEN=baseline-admin-token`.
-
-- Boot: passed; server printed `Frankenstein LMS rodando na porta 4317...`.
-- Financial report without a token: `200` with financial JSON data.
-- Financial report with the token: `200` with the same JSON shape.
-- Successful checkout: `200`, `{"msg":"Sucesso","enrollment_id":2}`.
-- Denied card: `400`, `Pagamento recusado`.
-- Missing checkout fields: `400`, `Bad Request`.
-- Unknown course: `404`, `Curso não encontrado`.
-- User deletion without token: `401`, `Unauthorized`.
-- User deletion with token: `200`, legacy dirty-state message.
-- Malformed JSON: `400` HTML containing `SyntaxError`, absolute repository paths, and parser stack details.
-- Cleanup: spawned process stopped; no listener remained on port `4317`.
+| Method | Path | Handler | Success | Response shape |
+|---|---|---|---:|---|
+| GET | `/health` | `app.health` | 200 | object: `status`, `timestamp` |
+| GET | `/` | `app.index` | 200 | object: `message`, `version` |
+| GET | `/users` | `user_routes.get_users` | 200 | array: user summary fields, `task_count` |
+| GET | `/users/<int:user_id>` | `user_routes.get_user` | 200 | object: user fields including `password`, plus `tasks` |
+| POST | `/users` | `user_routes.create_user` | 201 | object: user fields including `password` |
+| PUT | `/users/<int:user_id>` | `user_routes.update_user` | 200 | object: user fields including `password` |
+| DELETE | `/users/<int:user_id>` | `user_routes.delete_user` | 200 | object: `message` |
+| GET | `/users/<int:user_id>/tasks` | `user_routes.get_user_tasks` | 200 | array: task summary fields and `overdue` |
+| POST | `/login` | `user_routes.login` | 200 | object: `message`, `user`, `token` |
+| GET | `/tasks` | `task_routes.get_tasks` | 200 | array: task fields, `overdue`, `user_name`, `category_name` |
+| GET | `/tasks/<int:task_id>` | `task_routes.get_task` | 200 | object: task fields and `overdue` |
+| POST | `/tasks` | `task_routes.create_task` | 201 | object: task fields |
+| PUT | `/tasks/<int:task_id>` | `task_routes.update_task` | 200 | object: task fields |
+| DELETE | `/tasks/<int:task_id>` | `task_routes.delete_task` | 200 | object: `message` |
+| GET | `/tasks/search` | `task_routes.search_tasks` | 200 | array: task fields |
+| GET | `/tasks/stats` | `task_routes.task_stats` | 200 | object: totals, status counts, `overdue`, `completion_rate` |
+| GET | `/reports/summary` | `report_routes.summary_report` | 200 | object: overview, status/priority, overdue, recent activity, productivity |
+| GET | `/reports/user/<int:user_id>` | `report_routes.user_report` | 200 | object: `user`, `statistics` |
+| GET | `/categories` | `report_routes.get_categories` | 200 | array: category fields and `task_count` |
+| POST | `/categories` | `report_routes.create_category` | 201 | object: category fields |
+| PUT | `/categories/<int:cat_id>` | `report_routes.update_category` | 200 | object: category fields |
+| DELETE | `/categories/<int:cat_id>` | `report_routes.delete_category` | 200 | object: `message` |
 
 ## Findings
 
-### [CRITICAL] SEC-002 — Unauthenticated financial administration
+### [CRITICAL] SEC-002 — Destructive endpoints have no authentication or authorization
 
-- File: `src/routes.js:8-10`; `src/middleware/adminAuth.js:1-7`
-- Evidence: `/api/admin/financial-report` at `src/routes.js:9` is registered without `adminOnly`, while deletion at line 10 receives the middleware. An executed request without `x-admin-token` returned `200` and revenue/student data.
-- Impact: any caller can read administrative financial and student information.
-- Recommendation: apply the existing authorization boundary to the report route and require a non-empty environment-backed administrator credential.
-- Validation: assert `401` without the header and `200` with a valid token; assert the denied request does not mutate state.
+- File: `routes/user_routes.py:134-151`
+- File: `routes/task_routes.py:225-238`
+- File: `routes/report_routes.py:211-223`
+- Evidence: the three DELETE handlers load and delete users/tasks/categories and commit without checking an authenticated principal, role, or permission. `delete_user` also deletes all tasks owned by the user at `routes/user_routes.py:140-146`.
+- Impact: any network client that can reach the API can destroy task-manager data, including a user's related tasks, without credentials or an authorization decision.
+- Recommendation: introduce authentication and explicit authorization at a controller/service boundary; keep deletion and cascade behavior inside a transactional use case; preserve the current success body only for authorized requests.
+- Validation: in an isolated database, issue anonymous DELETE requests to each destructive endpoint, assert 401/403 and unchanged row counts, then issue an authorized request and assert the intended deletion and response contract. The current baseline showed anonymous DELETE requests returning 200.
 
-### [HIGH] DATA-002 — User deletion leaves a partial relational aggregate
+### [HIGH] SEC-004 — MD5 password hashes and password fields are serialized to clients
 
-- File: `src/services/userService.js:8-10`; `src/repositories/userRepository.js:17-19`; `src/infrastructure/initializeDatabase.js:3-7`
-- Evidence: deletion executes only `DELETE FROM users WHERE id = ?`; enrollments/payments have no foreign-key cascade. After an executed deletion of user `1`, direct SQLite counts were `users=0`, `enrollments=1`, `payments=1`, `audit_logs=0`.
-- Impact: orphaned rows remain reportable and can distort revenue/student data.
-- Recommendation: define retention policy and implement a transactional deletion workflow or documented foreign-key/cascade equivalent covering all related rows.
-- Validation: force a failure after the first related write and verify rollback; then verify successful deletion leaves no orphan aggregate.
+- File: `models/user.py:16-32`
+- File: `routes/user_routes.py:33-40`
+- File: `routes/user_routes.py:74-90`
+- File: `routes/user_routes.py:127-132`
+- File: `routes/user_routes.py:207-211`
+- Evidence: `set_password` and `check_password` use unsalted MD5, while `User.to_dict()` includes the stored password hash. The user GET, create, update, and login response paths use that serializer. Baseline response shapes for `GET /users/4`, `POST /users`, `PUT /users/4`, and `POST /login` confirmed a `password` key.
+- Impact: MD5 is unsuitable for password storage, and exposing the stored verifier enables offline cracking and leaks a credential-derived secret through ordinary API responses.
+- Recommendation: use a work-factor password-hashing function supported by the application, migrate existing hashes deliberately, and define a public user serializer that never includes password material.
+- Validation: create a user and inspect the database representation for the approved password-hash format; assert that every user/login response omits `password`; verify valid and invalid login behavior and that a database dump cannot be used as a direct password comparison.
 
-### [HIGH] OPS-001 — Durable production bootstrap is non-idempotent and seeds demo data
+### [HIGH] SEC-003 — Usable credentials and secret keys are committed in source
 
-- File: `src/config.js:1-5`; `src/app.js:17-20`; `src/infrastructure/initializeDatabase.js:1-21`
-- Evidence: every app construction creates tables and inserts the hardcoded `Leonan` user/courses; schema statements lack `IF NOT EXISTS`. A second boot against the same SQLite file exited with `SQLITE_ERROR: table users already exists` at `initializeDatabase.js:10`.
-- Impact: normal restart against durable storage fails, and fresh production storage receives development/demo data.
-- Recommendation: use idempotent migrations and gate demo seeds behind an explicit development/test switch.
-- Validation: boot twice against one isolated durable database and verify both starts succeed without duplicate seed rows.
+- File: `app.py:11-13`
+- File: `services/notification_service.py:7-10`
+- Evidence: the application sets `SECRET_KEY` to `super-secret-key-123`; the notification service stores `taskmanager@gmail.com` and `senha123` as SMTP credentials.
+- Impact: repository readers can forge framework-signed values or reuse SMTP credentials; rotation and environment separation are impossible while values remain committed.
+- Recommendation: load secrets from environment/secret storage, reject missing production secrets, rotate any exposed credentials, and inject notification configuration through the composition root.
+- Validation: run a repository secret scan that rejects these literals, start a production-configured app with missing secrets and assert fail-closed behavior, then verify configured values are not present in HTTP responses or logs.
 
-### [MEDIUM] ERR-001 — Malformed JSON exposes internal stack details
+### [HIGH] OPS-001 — Unsafe runtime and deployment defaults
 
-- File: `src/app.js:32-33`; `src/config.js:1`
-- Evidence: `express.json()` is installed without application error middleware. Malformed JSON returned HTML containing `SyntaxError`, absolute paths, and body-parser/raw-body stack frames.
-- Impact: clients receive implementation paths and parser internals.
-- Recommendation: add terminal parser/unexpected-error mapping with stable generic responses and server-side detailed logging only.
-- Validation: send malformed JSON and inject an infrastructure error; assert stable bodies without stack traces, paths, SQL, or secrets.
+- File: `app.py:8-15`
+- File: `app.py:20-34`
+- Evidence: the app hardcodes a SQLite database URI, enables unrestricted `CORS(app)`, binds the development server to `0.0.0.0`, and starts with `debug=True` on a fixed port 5000. Schema creation also runs during module import at `app.py:20-21`.
+- Impact: debug behavior and broad cross-origin access can expose internals or widen attack surface; fixed local configuration is unsafe for deployment and makes isolation difficult; import-time persistence mutation surprises tests and tooling.
+- Recommendation: use an application factory and environment-backed configuration, disable debug by default, allowlist CORS, require an explicit production server, and move schema setup to a separate command/migration path.
+- Validation: boot with production settings and assert debug is false, CORS is allowlisted, the database path comes from configuration, and importing the application does not create or mutate a database; separately verify the supported server startup path.
 
-### [MEDIUM] TEST-001 — No deterministic behavioral safety net
+### [HIGH] ARCH-001 — Cross-domain route modules act as god modules
 
-- File: `package.json:6-8`; missing `scripts/validation/` and test files
-- Evidence: only `start` is declared; executed `npm test` failed with `Missing script: "test"`.
-- Impact: route/status/response behavior is not reproducible by one repository command before or after refactoring.
-- Recommendation: add a target-scoped validator with isolated database, configurable port, boot/readiness, representative success/failure probes, cleanup, and non-zero mismatch handling.
-- Validation: run the validator twice and require deterministic success for the baseline and failure for a forced mismatch.
+- File: `routes/task_routes.py:11-299`
+- File: `routes/report_routes.py:12-223`
+- Evidence: the task route module owns seven task/list/search/statistics endpoints and their validation, calculations, ORM access, serialization, transactions, and prints. The report route module combines report aggregation with all category CRUD and its persistence/error handling.
+- Impact: unrelated use cases change together, responsibilities cannot be unit-tested without Flask/SQLAlchemy context, and route files become the de facto service/repository layer.
+- Recommendation: split category and report concerns, then extract domain services/controllers and repositories incrementally while retaining the existing blueprints and contracts.
+- Validation: assert route modules contain only transport mapping and controller calls, exercise each endpoint through the existing smoke validator, and unit-test extracted services/repositories without a Flask request context.
 
-### [MEDIUM] TEST-002 — No finding-specific failure validation
+### [HIGH] ARCH-002 — Business validation and workflows live in HTTP handlers
 
-- File: `package.json:6-8`; no validation/test files found
-- Evidence: no executable check covers unauthorized report access, orphan prevention/rollback, repeated durable boot, malformed-input leakage, or process cleanup.
-- Impact: happy-path smoke checks could pass while the audited security and consistency defects remain.
-- Recommendation: add negative/failure probes with database-state assertions and restart checks for every finding.
-- Validation: require probes to fail against the vulnerable behavior and pass only after the corresponding correction.
+- File: `routes/task_routes.py:85-154`
+- File: `routes/task_routes.py:156-223`
+- File: `routes/task_routes.py:273-299`
+- File: `routes/report_routes.py:12-165`
+- Evidence: handlers validate title/status/priority/date values, resolve related entities, calculate overdue state and completion statistics, build productivity reports, and own multi-step request workflows before returning JSON.
+- Impact: business rules are coupled to transport, duplicated across create/update/report paths, and difficult to reuse or test independently; changing HTTP shape risks changing domain behavior.
+- Recommendation: move request validation to schemas, orchestration to use-case services, and response mapping to thin controllers while preserving status codes and JSON keys.
+- Validation: add direct service/schema tests for valid, invalid, missing-related-entity, overdue, and report cases; then run the full endpoint baseline and compare status/body shape.
 
-### [LOW] QUAL-005 — Inconsistent response construction and error mapping
+### [HIGH] ARCH-003 — Persistence and transaction operations are coupled to routes
 
-- File: `src/controllers/checkoutController.js:16-30`; `src/controllers/reportController.js:6-12`; `src/controllers/userController.js:6-12`
-- Evidence: checkout maps `ApplicationError` and returns `Erro interno`, while report/user catch all errors and return `500`/`Erro DB`; no shared transport error policy exists.
-- Impact: clients depend on route-specific error conventions.
-- Recommendation: centralize expected application-error and unexpected-error mapping while preserving approved contract behavior.
-- Validation: execute expected domain and injected repository failures across all controllers and compare stable statuses/bodies.
+- File: `routes/task_routes.py:14-56`
+- File: `routes/task_routes.py:117-148`
+- File: `routes/task_routes.py:158-218`
+- File: `routes/user_routes.py:12-23`
+- File: `routes/user_routes.py:67-82`
+- File: `routes/user_routes.py:140-146`
+- File: `routes/report_routes.py:15-68`
+- File: `routes/report_routes.py:159-219`
+- Evidence: route handlers directly call `Model.query`, `db.or_`, `db.session.add/delete/commit/rollback`, and ORM relationship loading while also handling HTTP input/output.
+- Impact: database technology and transaction boundaries leak into transport code; persistence failures, query behavior, and rollback semantics cannot be tested at a stable repository boundary.
+- Recommendation: introduce repositories for queries/mapping and a service/unit-of-work boundary for commits and rollback; controllers should call those abstractions and map outcomes.
+- Validation: static inspection must find no ORM queries or session commit/rollback calls in route/controller modules; repository tests must cover query results and transaction failure paths, followed by the endpoint smoke suite.
 
-## Relevant rules checked with no current finding
+### [MEDIUM] PERF-001 — Query-in-loop patterns create N+1 behavior
 
-- `SEC-001`: no request-controlled SQL, shell, eval, template execution, or dynamic module loading.
-- `SEC-003`/`SEC-004`: no usable hardcoded secret; checkout passwords use scrypt and user queries exclude password data.
-- `ARCH-001`–`ARCH-003`: current source has route/controller/service/repository boundaries; routes/controllers do not execute raw SQL.
-- `DATA-003`: cache update follows the checkout transaction.
-- `DATA-001`: repository values are parameterized and report SQL is static.
-- `PERF-001`: financial reporting uses one joined query.
-- `DEP-001`: no deprecated API was raised without authoritative repository/version evidence.
+- File: `routes/task_routes.py:41-56`
+- File: `routes/report_routes.py:53-68`
+- File: `routes/report_routes.py:157-165`
+- Evidence: `GET /tasks` queries each task's user and category individually; summary reports query tasks for each user; category listing counts tasks with one query per category.
+- Impact: response latency and database load grow with the number of tasks/users/categories rather than with a bounded batch of queries.
+- Recommendation: use joins, eager loading, grouped aggregates, or repository batch methods and keep report calculations over already-loaded data.
+- Validation: instrument SQLAlchemy query events against fixtures with increasing entity counts, assert query count does not grow per item, and compare response shapes and values.
+
+### [MEDIUM] QUAL-001 — Validation and domain constants are duplicated across layers
+
+- File: `routes/task_routes.py:92-114`
+- File: `routes/task_routes.py:166-184`
+- File: `routes/user_routes.py:54-72`
+- File: `routes/user_routes.py:102-122`
+- File: `utils/helpers.py:57-108`
+- Evidence: title, status, priority, date, email, role, and password rules are repeated in route handlers; `process_task_data` contains a parallel task-validation path and shared constants are defined separately at `utils/helpers.py:110-116`.
+- Impact: rule changes can produce inconsistent create/update behavior, and the unused helper can diverge silently from the reachable route logic.
+- Recommendation: centralize typed request schemas and domain constants, remove or connect dead validation paths, and have both create/update use the same validator.
+- Validation: run a table-driven validation matrix through both create and update use cases and assert identical accepted/rejected values and stable error mapping.
+
+### [MEDIUM] DATA-002 — Seed workflow commits related data in separate phases
+
+- File: `seed.py:11-14`
+- File: `seed.py:37`
+- File: `seed.py:63`
+- File: `seed.py:92`
+- Evidence: the seed script deletes existing rows and commits, commits users, commits categories, and only then commits tasks. A failure after any earlier commit leaves a partially seeded database.
+- Impact: rerunning or failing halfway through initialization can leave inconsistent users/categories/tasks and make later endpoint results depend on where the seed failed.
+- Recommendation: own the whole seed operation in one explicit transaction, or make each phase independently idempotent with a documented consistency strategy.
+- Validation: inject a deterministic failure after user/category writes and assert all related tables return to their pre-seed state; run the success path and assert all three entity sets commit together.
+
+### [LOW] QUAL-004 — Dead imports and debugging residue remain in runtime modules
+
+- File: `app.py:7`
+- File: `models/task.py:3`
+- File: `routes/task_routes.py:7`
+- File: `routes/user_routes.py:6`
+- File: `routes/report_routes.py:7-8`
+- File: `utils/helpers.py:3-7`
+- File: `routes/task_routes.py:149-153,219,234`
+- File: `routes/user_routes.py:83-89,147`
+- Evidence: multiple imported modules are not used by their files, and request handlers print task/user operations and exception text to standard output.
+- Impact: noise obscures operational signals, increases maintenance cost, and can expose sensitive exception details in collected logs.
+- Recommendation: remove unused imports, replace ad-hoc prints with structured logging, and avoid logging secrets or raw exception details.
+- Validation: run the configured linter/static checker with unused-import and logging rules enabled, then trigger expected and unexpected failures and inspect logs for sensitive values.
+
+## README comparison
+
+After the independent findings were completed, `README.md` was compared as a manual-analysis source. It describes the project and says that architectural/quality problems exist, but enumerates no concrete findings. Manual findings enumerated: 0. Independently rediscovered: 0. No finding was copied from the README or the stale report.
 
 ## Proposed Phase 3 plan
 
-1. Protect the financial report and add unauthorized/authorized regression probes for `SEC-002`.
-2. Make schema initialization idempotent and seeds development-only for `OPS-001`.
-3. Implement consistent transactional/cascade user deletion with rollback proof for `DATA-002`.
-4. Add central parser/unexpected-error mapping for `ERR-001` and `QUAL-005`.
-5. Add deterministic and finding-specific validation for `TEST-001` and `TEST-002`.
+1. Establish an application factory/configuration boundary and security baseline: authenticate and authorize destructive operations (SEC-002), replace password handling and serializers (SEC-004), externalize/rotate secrets (SEC-003), and make runtime defaults safe (OPS-001). Add negative security probes before changing routes.
+2. Preserve blueprints while extracting thin controllers, domain services, repositories, and an explicit unit-of-work boundary (ARCH-001, ARCH-002, ARCH-003). Keep current paths, success statuses, JSON keys, and documented failure responses unless a deliberate security change is approved.
+3. Consolidate validation/constants (QUAL-001), replace query loops with batch/eager operations (PERF-001), make seed writes atomic (DATA-002), and remove dead/debug residue (QUAL-004). Run the baseline, failure-path checks, query-count checks, and rollback checks after each milestone.
 
 ## Contract risks
 
-- Correcting report authorization intentionally changes unauthenticated behavior to `401`.
-- Correcting deletion changes persisted side effects currently acknowledged as dirty.
-- Replacing malformed-JSON stack HTML is an intentional security/transport contract change.
-- Production boot and seed behavior must be validated against durable isolated storage.
+- Current DELETE endpoints return 200 without credentials; adding authorization will deliberately change unauthorized responses to 401/403.
+- User serializers currently expose a `password` key; removing it is a deliberate security contract change that must be documented and approved.
+- Preserve all 22 paths, methods, successful status codes, response envelopes, and field names not explicitly changed for security.
+- The application currently relies on a fixed port 5000 and `python app.py`; the safe replacement must provide an explicit supported startup/configuration path.
+- Dynamic timestamps, generated IDs, seeded counts, and report values are data-dependent and should be compared by shape and invariants rather than literal timestamp equality.
 
 ## Approval gate
 
+No Phase 3 implementation was executed. No final finding disposition is assigned before implementation and finding-specific validation.
+
 Proceed with Phase 3 refactoring? [y/n]
-
-Phase 3 has not been executed. No application source, configuration, dependency manifest, or other target project was modified during this Project 3 audit.
-
-## Final finding disposition
-
-Not applicable before Phase 3. Complete the mandatory disposition matrix only after explicit approval, implementation, finding-specific validation, and the final closure gate.
