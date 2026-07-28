@@ -5,9 +5,9 @@
 - Execution root: `/home/alexandredev/fullcycle-mba/mba-ia-refactor-projects-skill/task-manager-api`
 - Target: `task-manager-api` only
 - Explicit exclusion: `ecommerce-api-legacy` was not analyzed or modified
-- Skill: `refactor-arch`, Phases 1 and 2 only
-- Phase 3: not executed; the approval gate is preserved at the end of this file
-- Application code policy: no application Python module was edited. The only non-report files created were the required per-repository napkin runbook and a deterministic validation helper under `scripts/validation/`; both are non-application support artifacts.
+- Skill: `refactor-arch`, Phases 1, 2 and 3
+- Phase 3: executed after the explicit approval recorded in the historical gate below; final implementation and closure evidence follow.
+- Application code policy: Phases 1 and 2 did not edit application modules. Phase 3 subsequently changed application modules and validation support files, all listed in the implementation and closure sections.
 
 ## Preconditions
 
@@ -177,11 +177,11 @@ After the findings and report were complete, the README comparison was performed
 - `scripts/validation/validate-task-manager-api.sh` — deterministic non-application validation helper created for this target
 - `.codex/napkin.md` — per-repository runbook created by the active napkin skill
 
-Application files such as `app.py`, `database.py`, `seed.py`, `models/*.py`, `routes/*.py`, `services/*.py`, and `utils/*.py` were not modified. No other project was modified.
+During the Phase 1/2 portion, application files such as `app.py`, `database.py`, `seed.py`, `models/*.py`, `routes/*.py`, `services/*.py`, and `utils/*.py` were not modified. During Phase 3, the application changes are summarized in the implementation milestones and final disposition matrix below. No other project was modified.
 
-## Phase 3 gate
+## Phase 3 gate — historical transition
 
-Phase 3 was not started. No refactoring, final disposition matrix, or finding closure was claimed. The next action requires explicit approval in this same session.
+Before the gate, Phase 3 had not started and no finding closure was claimed. Approval `y` was then received in the same session; the Phase 3 implementation and final disposition matrix below are the resulting execution evidence.
 
 Proceed with Phase 3 refactoring? [y/n]
 

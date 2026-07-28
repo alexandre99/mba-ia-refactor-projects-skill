@@ -147,9 +147,7 @@ An earlier inline matrix attempt exited 1 because the test expected 11 products 
 
 ### Post-refactoring findings review
 
-Resolved or materially mitigated: `SEC-001`, `SEC-002`, `SEC-003`, `SEC-004`, `ARCH-001`, `ARCH-002`, `ARCH-003`, `DATA-001`, `QUAL-001`, `PERF-001`, `ERR-001`, `TEST-001`, `QUAL-002` and `QUAL-004`.
-
-Remaining or intentionally retained risks: `OPS-001` is reduced because debug is off and the default bind is loopback, but `python app.py` still uses Flask's development server for legacy compatibility; production should use an external WSGI server. `QUAL-005` remains because differing not-found response envelopes were preserved for compatibility and are documented as a contract risk.
+Final disposition is recorded in the complete matrix added to `reports/audit-project-1.md`. The security and HIGH findings are resolved for the audited root causes. `PERF-001`, `ERR-001`, `QUAL-004` and `QUAL-005` remain `PARTIALLY_RESOLVED` because the historical run did not record every protocol-specific proof needed for `RESOLVED`; their residual risks are explicit in that matrix. `OPS-001` is resolved for the audited debug/exposed-bind defaults, with the remaining local development-server caveat documented as an operational risk.
 
 ### Files changed in Phase 3
 
@@ -162,4 +160,4 @@ Remaining or intentionally retained risks: `OPS-001` is reduced because debug is
 
 - Findings report: `../reports/audit-project-1.md`; its original findings, severities and recommendations were preserved.
 - Baseline status: `PASSED`; detailed pre-refactoring evidence remains in the earlier sections of this report.
-- Phase 3: completed; syntax, isolated boot and the 19-path endpoint matrix passed.
+- Phase 3: completed; syntax, isolated boot and the 19-path endpoint matrix passed. The final disposition matrix is in the audit report.

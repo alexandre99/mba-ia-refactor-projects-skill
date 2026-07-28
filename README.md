@@ -1,172 +1,118 @@
-# Refatoração Arquitetural Automatizada com OpenAI Codex
+# Consolidação Final — experimento `refactor-arch`
 
-Projeto acadêmico para criação e validação da Custom Skill `refactor-arch`. A entrega só será considerada concluída quando a mesma skill executar as três fases nos três projetos, produzir os relatórios, modificar o código após aprovação humana e registrar validação real de boot, endpoints e fechamento dos findings.
+Este repositório registra a criação, evolução e execução da skill `refactor-arch` em três APIs legadas. O experimento está concluído: os três projetos passaram por análise, auditoria, aprovação para mudança, refatoração MVC incremental e validação comportamental. Este documento é a consolidação final; não representa uma nova execução das Fases 1, 2 ou 3.
 
-## Ferramenta escolhida
+## Objetivo
 
-- OpenAI Codex
-- Skill path: `.codex/skills/refactor-arch/`
-- Referências: Markdown
-- Projetos-alvo: Python/Flask, Node.js/Express e Python/Flask parcialmente organizado
+Avaliar se uma skill do Codex consegue conduzir uma refatoração arquitetural reproduzível e baseada em evidências, preservando o contrato HTTP observável. O trabalho mede, em cada aplicação, a capacidade de:
 
-## Análise Manual
+- inventariar runtime, framework, banco, arquivos, startup e endpoints;
+- produzir auditoria independente com evidência de arquivo e linha;
+- pausar antes de modificar a aplicação e exigir aprovação humana;
+- conduzir uma migração incremental para fronteiras MVC pragmáticas;
+- provar boot, endpoints, caminhos negativos, rollback e fechamento dos findings.
 
-Esta seção foi produzida antes da execução da skill, como exige o enunciado. Ela funciona como referência de avaliação: a skill deve encontrar independentemente pelo menos cinco problemas em cada projeto e redescobrir parte relevante destes achados.
+## Escopo e metodologia
 
-### Projeto 1 — `code-smells-project`
+Foram avaliadas três aplicações: `code-smells-project` (Python/Flask, e-commerce), `ecommerce-api-legacy` (Node.js/Express, LMS/checkout) e `task-manager-api` (Python/Flask, tarefas e relatórios). A metodologia teve quatro momentos:
 
-| Severidade | Problema | Evidência | Relevância |
-|---|---|---|---|
-| CRITICAL | Endpoint de execução arbitrária de SQL | `app.py:61-80` | Permite leitura, alteração ou destruição do banco por uma requisição não autenticada. |
-| CRITICAL | SQL Injection por concatenação | `models.py:45-63`, `107-131`, `287-301` | Valores do cliente são concatenados diretamente em queries. |
-| HIGH | God module com múltiplos domínios | `models.py:1-316` | Produtos, usuários, autenticação, pedidos, estoque e relatórios estão acoplados. |
-| MEDIUM | Queries N+1 em pedidos | `models.py:173-235` | Cada pedido busca itens e cada item busca novamente o produto. |
-| MEDIUM | Validação duplicada | `controllers.py:26-98` | Regras de produto se repetem em criação e atualização. |
-| MEDIUM | Tratamento amplo de exceções | `controllers.py:7-294` | Erros internos são expostos e não existe política centralizada. |
-| LOW | Magic values | `controllers.py:54-56`, `models.py:258-264` | Categorias e faixas de desconto estão espalhadas. |
-| LOW | Logging com `print` | `controllers.py:10-13`, `210-212` | Não há logging estruturado. |
+1. análise manual inicial, mantida no histórico do README e usada somente para comparação posterior;
+2. execução da versão corrente da `refactor-arch` nas Fases 1 e 2, com inventário e auditoria independente;
+3. gate explícito de aprovação humana e Fase 3 incremental, com preservação de rotas, status e shapes salvo correção de segurança documentada;
+4. validação final por aplicação e matriz de disposition, incluindo provas específicas para segurança, transação, rollback, erros, efeitos externos e N+1 quando aplicável.
 
-### Projeto 2 — `ecommerce-api-legacy`
+A skill usa um `SKILL.md` e sete referências especializadas: `project-analysis.md`, `anti-pattern-catalog.md`, `audit-report-template.md`, `mvc-guidelines.md`, `refactoring-playbook.md`, `validation-playbook.md` e `finding-resolution.md`. As cópias completas ficam em `.codex/skills/refactor-arch/` dentro de cada projeto.
 
-| Severidade | Problema | Evidência | Relevância |
-|---|---|---|---|
-| CRITICAL | Credenciais e chave de pagamento hardcoded | `src/utils.js:1-8` | Segredos ficam expostos no código-fonte. |
-| CRITICAL | Cartão e chave do gateway em logs | `src/AppManager.js:45-50` | Expõe dados financeiros sensíveis. |
-| HIGH | God Class `AppManager` | `src/AppManager.js:6-143` | A mesma classe cria banco, registra rotas, faz checkout e gera relatórios. |
-| MEDIUM | Checkout sem transação | `src/AppManager.js:45-65` | Falhas parciais podem deixar dados inconsistentes. |
-| MEDIUM | N+1 no relatório financeiro | `src/AppManager.js:82-130` | Cursos, matrículas, usuários e pagamentos são carregados em cascata. |
-| MEDIUM | Callback pyramid e erros inconsistentes | `src/AppManager.js:39-79`, `85-130` | O fluxo é difícil de testar e alguns erros são ignorados. |
-| LOW | Variáveis crípticas | `src/AppManager.js:30-35` | Nomes como `u`, `e`, `p`, `cid` e `cc` escondem o domínio. |
-| LOW | Estado global mutável | `src/utils.js:11-17` | Cria acoplamento oculto e vazamento entre testes. |
+## Evolução da skill após o Projeto 2
 
-### Projeto 3 — `task-manager-api`
+A primeira execução do Projeto 2 mostrou que separar rotas, controllers, services e repositories e passar no smoke test não prova atomicidade. O checkout ainda podia deixar escritas parciais sem que a validação detectasse o defeito.
 
-| Severidade | Problema | Evidência | Relevância |
-|---|---|---|---|
-| CRITICAL | Token previsível | `routes/user_routes.py:187-213` | `fake-jwt-token-<id>` pode ser forjado. |
-| HIGH | Secret hardcoded e debug habilitado | `app.py:13-16`, `35-36` | Configuração insegura pode chegar a ambientes não locais. |
-| HIGH | Fat controllers | `routes/task_routes.py:13-301`, `routes/user_routes.py:12-213` | Rotas ainda concentram negócio, persistência e serialização. |
-| MEDIUM | N+1 na listagem de tarefas | `routes/task_routes.py:13-61` | Cada tarefa pode consultar usuário e categoria separadamente. |
-| MEDIUM | API legada do SQLAlchemy | `routes/task_routes.py:44`, `53`, `69`; `routes/user_routes.py:31`, `96` | `Model.query.get()` deve ser avaliado contra a versão instalada e migrado quando aplicável. |
-| MEDIUM | Serialização e atraso duplicados | `routes/task_routes.py:18-61`, `67-83`; `routes/user_routes.py:155-185` | A mesma regra aparece em rotas diferentes. |
-| LOW | Imports não utilizados | `app.py:9`, `routes/task_routes.py:8-9` | Aumentam ruído e escondem dependências reais. |
-| LOW | Magic literals | `routes/task_routes.py:112-116`, `178-185`; `routes/user_routes.py:73-74` | Status, prioridade e roles podem divergir. |
+Com base nessa evidência, a skill foi fortalecida para:
 
-## Construção da Skill
+- tratar `DATA-002` como regra independente de fronteiras arquiteturais;
+- exigir uma unidade transacional explícita para escritas relacionadas;
+- exigir falha injetada, rollback verificável e efeitos externos somente após commit;
+- exigir validação específica para findings de segurança, consistência, erro e performance;
+- exigir matriz final completa antes de declarar conclusão.
 
-A skill usa um `SKILL.md` como orquestrador e sete referências especializadas:
+As três cópias da skill e de suas referências foram então mantidas sincronizadas. O Projeto 2 foi reavaliado pela versão consolidada antes da execução final do Projeto 3.
 
-```text
-.codex/skills/refactor-arch/
-├── SKILL.md
-└── references/
-    ├── project-analysis.md
-    ├── anti-pattern-catalog.md
-    ├── audit-report-template.md
-    ├── mvc-guidelines.md
-    ├── refactoring-playbook.md
-    ├── validation-playbook.md
-    └── finding-resolution.md
-```
+## Execução dos três projetos
 
-### Decisões de design
+| Projeto | Execução final registrada | Findings da matriz final | Resultado documentado |
+|---|---|---:|---|
+| 1 — `code-smells-project` | [audit](reports/audit-project-1.md) e [execution](reports/execution-project-1.md) | 16 | 12 `RESOLVED`; 4 `PARTIALLY_RESOLVED` MEDIUM/LOW (`PERF-001`, `ERR-001`, `QUAL-004`, `QUAL-005`) |
+| 2 — `ecommerce-api-legacy` | reavaliação consolidada em [audit](reports/audit-project-2.md) e [execution](reports/execution-project-2.md) | 5 atuais | 4 `RESOLVED`; 1 `PARTIALLY_RESOLVED` de baixa severidade (`QUAL-005`) |
+| 3 — `task-manager-api` | [audit](reports/audit-project-3.md) e [execution](reports/execution-project-3.md) | 11 | 11 `RESOLVED` |
 
-1. Três fases sequenciais: análise, auditoria e refatoração.
-2. Nenhum arquivo da aplicação pode ser alterado nas Fases 1 e 2.
-3. A Fase 2 exige confirmação humana explícita na mesma sessão.
-4. A skill não pode copiar os findings desta análise manual; a comparação ocorre somente depois do relatório independente.
-5. Todo finding exige severidade, regra, arquivo, linhas, evidência, impacto, recomendação e validação capaz de detectar a causa raiz.
-6. O alvo é MVC pragmático: routes/views tratam HTTP, controllers orquestram, services executam workflows, models representam dados e repositories isolam persistência.
-7. Projetos parcialmente organizados devem preservar fronteiras úteis, evitando reescrita artificial.
-8. Boot e endpoints precisam ser realmente executados; ausência de runtime é bloqueio, não sucesso.
-9. Cada execução produz um relatório de auditoria e um arquivo de evidências com comandos, resultados e desvios contratuais.
-10. Mover código para uma camada melhor não resolve automaticamente um finding; a causa raiz precisa ser removida e validada.
-11. Fluxos com múltiplas escritas relacionadas exigem análise explícita de transação, rollback e efeitos externos após commit.
-12. A Fase 3 só pode ser concluída após uma matriz de disposition para todos os findings.
+Os números do Projeto 2 são da reavaliação final. O mesmo relatório preserva, antes dela, a auditoria e a execução históricas do primeiro ciclo; findings históricos não são contados novamente na linha final.
 
-O catálogo contém anti-patterns com severidades distribuídas, incluindo execução arbitrária, segredos hardcoded, password handling inseguro, God Class, fat controllers, transação ausente, efeitos externos antes do commit, N+1, duplicação, exceções genéricas, falta de safety net e APIs deprecated. O playbook contém transformações com exemplos antes/depois e critérios de prova.
+### Projeto 1 — e-commerce Python/Flask
 
-## Protocolo de Execução e Validação
+O baseline executou os 19 paths originais em SQLite descartável. A Fase 3 criou composição configurável, services e repositories, parametrizou as consultas, limitou as operações administrativas, removeu segredos do health check, aplicou hashing de senha, centralizou erros e ampliou a validação. A validação final registrada cobriu os 19 paths e probes de segurança; boot, endpoints e cleanup passaram com exit code 0.
 
-Cada projeto deve ser executado em uma branch limpa contendo código legado e a skill, mas sem relatórios ou refatorações previamente produzidos.
+As mudanças contratuais intencionais foram: `/health` não expõe segredo/debug/path; respostas de usuário não expõem `senha`; reset administrativo exige token; e `/admin/query` aceita somente a consulta allowlisted. O risco residual documentado é a divergência histórica de envelopes de erro (`QUAL-005`), além da necessidade operacional de usar WSGI em produção.
 
-Para cada projeto:
+### Projeto 2 — LMS/checkout Node.js/Express
 
-1. iniciar uma nova sessão do Codex na raiz do projeto;
-2. pedir explicitamente o uso da skill `refactor-arch`;
-3. executar somente Fases 1 e 2;
-4. confirmar que nenhum arquivo da aplicação mudou;
-5. revisar o relatório gerado e registrar quantos achados manuais foram redescobertos;
-6. responder `y` ao gate na mesma sessão;
-7. deixar a skill executar a Fase 3;
-8. exigir boot, validação de endpoints, testes negativos/failure-path e comparação antes/depois;
-9. revisar a matriz de disposition e impedir conclusão falsa de findings;
-10. revisar `reports/audit-project-N.md` e `reports/execution-project-N.md`;
-11. commitar o resultado daquele projeto separadamente.
+O primeiro ciclo removeu segredos, hashing inseguro, god module, acoplamento HTTP/SQLite e N+1 no relatório, preservando os contratos observados. A reavaliação pela skill consolidada encontrou cinco itens atuais: transação ausente, default de storage inseguro em produção, safety net sem prova de rollback, magic values e respostas legadas divergentes.
 
-### Comando de entrada
+A correção final adicionou unidade transacional no checkout, rollback após falha intermediária, cache somente depois do commit, guard de storage durável em produção, probes específicos e constantes de checkout. O validator padrão e o validator em porta configurável passaram com exit code 0. `QUAL-005` permanece parcialmente resolvido por compatibilidade: falhas textuais, sucesso JSON e relatório em array continuam distintos. O relatório também registra os avisos de auditoria de dependências do npm e o risco de relatório financeiro público como limitações fora do escopo corretivo final.
 
-```bash
-cd code-smells-project
-codex "Use obrigatoriamente a skill refactor-arch. Execute as Fases 1 e 2, gere o relatório e as evidências, e pare no gate antes da Fase 3."
-```
+### Projeto 3 — task manager Python/Flask
 
-Repetir em `ecommerce-api-legacy` e `task-manager-api`. Após revisar o relatório, responder `y` na própria sessão.
+O baseline primeiro registrou a limitação do validator original (`python` indisponível e cobertura insuficiente); depois uma virtualenv isolada permitiu a validação completa dos 22 padrões de rota. Após aprovação, a Fase 3 adicionou configuração por ambiente, application factory, WSGI, tokens assinados, autorização administrativa, hashing de senha, controllers/services/repositories, validação centralizada, carregamento sem N+1 e seed transacional.
 
-### Critérios de aprovação por projeto
+As validações finais passaram em portas 5000 e 5053, incluindo boot, todos os endpoints, 401 anônimo, 200 autorizado, rollback, seed, contagem de queries, Ruff, compileall e guards de produção. Nenhum finding permaneceu parcial ou não tratado. Mudanças de segurança documentadas: DELETE passou a exigir autorização; tokens passaram a ser assinados; respostas não expõem `password`; e produção exige segredo e WSGI.
 
-- stack e domínio detectados corretamente;
-- pelo menos cinco findings;
-- pelo menos um CRITICAL ou HIGH;
-- arquivos e linhas exatos;
-- detecção de API deprecated quando sustentada pela versão instalada;
-- pausa real antes da Fase 3;
-- estrutura MVC adequada ao contexto;
-- configuração extraída;
-- error handling centralizado;
-- transações e efeitos externos avaliados quando houver múltiplas escritas;
-- application boot aprovado;
-- endpoints originais exercitados;
-- validações negativas específicas executadas para segurança, rollback e erros;
-- mudanças contratuais de segurança documentadas;
-- matriz final contendo todos os findings e disposições válidas;
-- nenhum CRITICAL/HIGH parcialmente resolvido ou não tratado sem aprovação explícita;
-- relatório e evidências gerados pela execução da skill.
+## Resultados consolidados
 
-## Evolução orientada por evidências
+Nas matrizes finais atuais há 32 findings distintos entre os três escopos: 27 `RESOLVED` e 5 `PARTIALLY_RESOLVED`, todos MEDIUM/LOW. Não há `CRITICAL` ou `HIGH` com disposition `PARTIALLY_RESOLVED` ou `NOT_ADDRESSED`. Não há `ACCEPTED_RISK` sem aprovação explícita registrada.
 
-A execução real do Projeto 2 revelou uma lacuna de protocolo: a separação MVC e o smoke test poderiam passar enquanto um risco de consistência transacional permanecia. A skill foi fortalecida para exigir regra própria de atomicidade, testes de falha/rollback e fechamento formal de findings. Essa evolução é uma decisão de Staff/Skill Designer baseada em evidência da execução, não um finding copiado da análise manual durante a auditoria.
+Os contratos não relacionados a segurança foram preservados nos três projetos: paths, métodos, status de sucesso e shapes observados nos baselines. As exceções estão listadas nos relatórios de execução e nas seções de mudanças contratuais acima.
 
-Após esta atualização, as três cópias da skill devem permanecer idênticas. O Projeto 2 deve ser reavaliado pela versão consolidada antes do Projeto 3. Projetos já executados podem ser revalidados pela matriz de disposition sem apagar a evidência histórica da versão anterior.
+## Limitações conhecidas e riscos residuais
 
-## Estado Atual
+- O Projeto 1 preserva envelopes de erro historicamente divergentes e usa o servidor Flask apenas para compatibilidade local; produção deve fornecer WSGI externo.
+- O Projeto 1 não possui, nos registros históricos, uma medição formal de contagem de queries para fechar `PERF-001`; também faltam probes específicos para falha inesperada (`ERR-001`) e uma verificação dedicada de lint/log (`QUAL-004`). Esses findings permanecem parciais apesar das melhorias implementadas.
+- O Projeto 2 mantém respostas legadas com mídias/shapes diferentes e um relatório financeiro público por compatibilidade do escopo; a configuração de produção, porém, falha fechada sem storage durável.
+- O Projeto 2 registrou 13 avisos de vulnerabilidade do `npm audit` no processo de instalação; nenhum finding de API obsoleta foi criado sem evidência autoritativa de uso.
+- O Projeto 3 requer migração/reset de registros com hashes antigos e depende de um processo WSGI externo em produção; o escopo não adicionou uma suíte unitária externa.
+- IDs, timestamps, seeds e valores agregados são dependentes dos dados temporários; a comparação válida é por shape, status e invariantes.
+- A consolidação final verifica documentação e referências. Ela não reexecuta aplicações, validators ou qualquer fase da skill.
 
-- [x] análise manual dos três projetos;
-- [x] skill e referências iniciais;
-- [x] skill copiada para os três projetos;
-- [x] protocolo de integridade e evidência incorporado ao `SKILL.md`;
-- [x] protocolo de fechamento de findings, transações e validação negativa incorporado;
-- [x] refatorações manuais removidas;
-- [x] relatórios não executados removidos;
-- [ ] referências das três cópias verificadas como idênticas após a revisão;
-- [ ] Projeto 2 reavaliado e corrigido com a versão consolidada;
-- [ ] Fases 1 e 2 executadas pelo Codex nos três projetos;
-- [ ] Fase 3 executada pela skill nos três projetos;
-- [ ] boot, endpoints e finding-specific validations aprovados nos três projetos;
-- [ ] relatórios, logs e comparação antes/depois incorporados ao README.
+## Evidências e validações históricas
 
-## Resultados
+Os seis relatórios são a fonte de verdade dos comandos e exit codes de cada execução:
 
-Os resultados finais devem refletir apenas execuções reais. Relatórios históricos podem registrar a evolução da skill, mas a entrega final precisa usar a versão consolidada e indicar os findings resolvidos, parcialmente resolvidos, aceitos ou não tratados.
+- [Auditoria e execução do Projeto 1](reports/audit-project-1.md) · [evidências](reports/execution-project-1.md)
+- [Auditoria e execução do Projeto 2](reports/audit-project-2.md) · [evidências](reports/execution-project-2.md)
+- [Auditoria e execução do Projeto 3](reports/audit-project-3.md) · [evidências](reports/execution-project-3.md)
 
-Os arquivos esperados ao final são:
+Cada auditoria contém findings com severidade, regra, arquivo, linhas, evidência, impacto, recomendação e validação; cada execução contém baseline, aprovação, mudanças, contratos, validações e cleanup. O relatório do Projeto 1 agora inclui a matriz final completa; o do Projeto 2 separa histórico e reavaliação; e o do Projeto 3 separa o gate histórico da implementação efetivamente executada.
 
-```text
-reports/
-├── audit-project-1.md
-├── execution-project-1.md
-├── audit-project-2.md
-├── execution-project-2.md
-├── audit-project-3.md
-└── execution-project-3.md
-```
+## Validações da consolidação final — 2026-07-27
+
+Foram executadas somente verificações documentais e de consistência:
+
+- `rtk git diff --check`: exit 0;
+- `rtk diff -rq` entre cada par das três cópias completas da skill: exit 0;
+- existência dos seis relatórios, 24 arquivos de skill/referência (oito em cada cópia) e três READMEs dos projetos: exit 0;
+- links locais do README apontando para os seis relatórios: exit 0;
+- matrizes finais: exit 0, com 16, 5 e 11 rows respectivamente;
+- busca por whitespace final, checklist pendente e frases obsoletas do Projeto 3: exit 1 em cada busca, interpretação esperada de “nenhuma ocorrência”;
+- busca específica por `CRITICAL`/`HIGH` parcial ou não tratado: exit 1, sem ocorrência;
+- `git status --short`: somente README, relatórios e `.codex/napkin.md` modificados.
+
+Nenhuma aplicação, validator de projeto, boot, endpoint ou fase da skill foi executado nesta consolidação.
+
+## Estado final do experimento
+
+- [x] análise manual e metodologia documentadas;
+- [x] Fases 1 e 2 executadas nos três projetos;
+- [x] aprovação humana e Fase 3 executadas nos três projetos;
+- [x] Projeto 2 reavaliado após a evolução da skill;
+- [x] boot, endpoints e validações específicas registradas;
+- [x] dispositions finais revisadas e riscos residuais registrados;
+- [x] README e relatórios consolidados;
+- [x] três cópias da skill verificadas como sincronizadas.
