@@ -212,3 +212,45 @@ After the independent findings were completed, `README.md` was compared as a man
 No Phase 3 implementation was executed. No final finding disposition is assigned before implementation and finding-specific validation.
 
 Proceed with Phase 3 refactoring? [y/n]
+
+## Phase 3 — Implementation result
+
+The approved refactoring was executed incrementally. The composition root now uses `create_app()` in `app.py:13-38`, configuration is environment-backed in `config.py:11-35`, and production exposes `wsgi:app` through `wsgi.py:1-4`. Routes are transport-only wrappers in `routes/task_routes.py:19-59`, `routes/user_routes.py:19-52`, `routes/report_routes.py:10-17`, and `routes/category_routes.py:16-34`; repositories own ORM access in `repositories/*.py`, services own workflows, and `controllers/response.py:6-13` centralizes expected/unexpected error mapping.
+
+Security and contract changes intentionally approved in Phase 3:
+
+- anonymous DELETE requests now fail with 401; admin bearer-token requests retain 200 success responses;
+- login tokens are signed with `itsdangerous` and expire according to `TOKEN_MAX_AGE`;
+- user create/get/update/login responses no longer contain `password`;
+- production requires `SECRET_KEY`, forces debug off, and refuses `python app.py`; production should load `wsgi:app` through a WSGI server;
+- CORS defaults to an explicit localhost allowlist and host/port/database settings are configurable.
+
+## Post-refactor validation
+
+- `PYTHON_BIN=/tmp/task-manager-api-phase3.oZMGVh/venv/bin/python bash scripts/validation/validate-task-manager-api.sh`: exit 0 on port 5000; all endpoint probes, anonymous 401 checks, authorized 200 checks, and cleanup passed.
+- `PYTHON_BIN=/tmp/task-manager-api-phase3.oZMGVh/venv/bin/python PORT=5053 bash scripts/validation/validate-task-manager-api.sh`: exit 0; configurable-port boot and the same endpoint contract passed.
+- `PYTHONPATH=. /tmp/task-manager-api-phase3.oZMGVh/venv/bin/python scripts/validation/validate-findings.py`: exit 0; password, authorization, rollback, seed, and query-count checks passed with `{'task': 1, 'report': 5, 'category': 2}`.
+- `/tmp/task-manager-api-phase3.oZMGVh/venv/bin/ruff check app.py auth.py config.py controllers models repositories routes services utils seed.py wsgi.py`: exit 0.
+- `python3 -m compileall -q .`: exit 0.
+- `APP_ENV=production SECRET_KEY=validation-secret /tmp/task-manager-api-phase3.oZMGVh/venv/bin/python -c "from wsgi import app; assert app.debug is False"`: exit 0.
+- `APP_ENV=production SECRET_KEY=validation-secret /tmp/task-manager-api-phase3.oZMGVh/venv/bin/python app.py`: exit 1 as the intentional production guard; no development server was started.
+- `APP_ENV=production SECRET_KEY= /tmp/task-manager-api-phase3.oZMGVh/venv/bin/python -c "from app import app"`: exit 1 as the intentional fail-closed secret guard.
+- Static review after implementation found no ORM/session calls in `routes/` or `controllers/`, no old MD5/committed-secret literals in application Python, exactly one seed commit, and no runtime `print()` calls in routes/controllers/services/utils.
+
+## Final finding disposition
+
+| Finding | Disposition | Final implementation evidence | Validation evidence | Remaining risk |
+|---|---|---|---|---|
+| `SEC-002` — unauthenticated destructive endpoints | `RESOLVED` | `auth.py:31-42`; protected DELETE routes at `routes/task_routes.py:39-42`, `routes/user_routes.py:39-42`, `routes/category_routes.py:31-34` | `scripts/validation/validate-findings.py:61-77`; main validator anonymous DELETE -> 401 and admin DELETE -> 200 | Authorization is admin-only; broader per-resource ownership policy is not implemented |
+| `SEC-004` — MD5/password disclosure | `RESOLVED` | `models/user.py:16-30` uses Werkzeug password hashing and omits `password` from `to_dict()` | `scripts/validation/validate-findings.py:32-52`; all user/login smoke shapes omit `password` | Existing databases containing legacy MD5 hashes require a password-reset/migration procedure; the final app no longer generates, verifies, or emits MD5 material |
+| `SEC-003` — committed secrets | `RESOLVED` | `config.py:11-35` loads secret/SMTP values from environment; `services/notification_service.py:5-28` has no literals | old-literal `rg` scan exit 0; production missing-secret import exit 1 | Secret rotation must still be performed for any credentials exposed by the old revision |
+| `OPS-001` — unsafe runtime defaults | `RESOLVED` | `config.py:17-30`; `app.py:13-48`; `wsgi.py:1-4` | production WSGI import exit 0, production `app.py` guard exit 1, smoke passed on ports 5000 and 5053, factory import created no database | A production WSGI server/deployment process must be supplied externally |
+| `ARCH-001` — god route modules | `RESOLVED` | split category/report routes plus `controllers/`, `services/`, and `repositories/` boundaries | smoke passed all 22 route patterns; direct service/repository finding checks passed | Controllers/services are intentionally lightweight and share the existing global SQLAlchemy extension |
+| `ARCH-002` — business logic in routes | `RESOLVED` | validation/workflows in `utils/validation.py:6-114` and `services/task_service.py:22-99`, `services/user_service.py:22-105`, `services/report_service.py` | route inspection found only request parsing/delegation; full smoke and finding-specific tests passed | No dedicated external test suite was added; deterministic scripts cover the audited behaviors |
+| `ARCH-003` — persistence coupled to routes | `RESOLVED` | ORM access in `repositories/task_repository.py:7-34`, `repositories/user_repository.py:7-21`, `repositories/category_repository.py:7-18`; `repositories/unit_of_work.py:8-18` owns commits | `rg` for ORM/session calls in `routes controllers` returned no matches; smoke passed | Repository abstractions still use the global Flask-SQLAlchemy extension |
+| `PERF-001` — N+1 query loops | `RESOLVED` | joined/select-in loading in `repositories/task_repository.py:7-9`, `repositories/user_repository.py:7-9`, `repositories/category_repository.py:7-9`; aggregate calculations in `services/report_service.py` | finding-specific query counts: task 1, report 5, category 2 | Counts should be re-baselined if new report dimensions are added |
+| `QUAL-001` — duplicated validation/constants | `RESOLVED` | centralized rules in `utils/validation.py:6-114`; services call the same normalizers; `models/task.py` reuses `VALID_STATUSES` | finding-specific validation and full Ruff exit 0 | Validation compatibility helper remains for callers of the old `utils.helpers.process_task_data` name |
+| `DATA-002` — non-atomic seed | `RESOLVED` | one transaction with flushes and rollback in `seed.py:13-57` | injected post-flush seed failure preserved pre-seed counts; source contains exactly one `db.session.commit()` | SQLite schema creation remains a separate idempotent setup step before the transaction |
+| `QUAL-004` — dead imports/debug residue | `RESOLVED` | cleaned imports and structured logging in `utils/helpers.py`, `services/notification_service.py`, and `controllers/response.py:11-13`; routes have no ad-hoc prints | full Ruff exit 0, compileall exit 0, and runtime static print scan passed | Logging policy is minimal and can be expanded for deployment observability |
+
+No CRITICAL or HIGH finding remains partially resolved or unaddressed. The final closure gate passed with application boot, endpoint validation, negative/failure-path validation, and cleanup all successful.

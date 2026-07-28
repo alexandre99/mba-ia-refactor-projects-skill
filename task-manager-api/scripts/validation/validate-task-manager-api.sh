@@ -45,20 +45,16 @@ require_command curl
 require_command mktemp
 require_command setsid
 
-[[ "${PORT}" == "5000" ]] || {
-    echo "this application hardcodes port 5000; use PORT=5000" >&2
-    exit 1
-}
-
 "${PYTHON_BIN}" -c 'import flask, flask_sqlalchemy, flask_cors, requests'
 PYTHONPYCACHEPREFIX="${TMP_DIR}/pycache" "${PYTHON_BIN}" -m compileall -q "${PROJECT_DIR}"
 echo "RUNTIME: ${PYTHON_BIN}"
 echo "COMPILE: passed"
 
 mkdir -p "${WORK_DIR}"
-cp -a "${PROJECT_DIR}/app.py" "${PROJECT_DIR}/database.py" "${PROJECT_DIR}/seed.py" \
-    "${PROJECT_DIR}/models" "${PROJECT_DIR}/routes" "${PROJECT_DIR}/services" \
-    "${PROJECT_DIR}/utils" "${WORK_DIR}/"
+cp -a "${PROJECT_DIR}/app.py" "${PROJECT_DIR}/auth.py" "${PROJECT_DIR}/config.py" \
+    "${PROJECT_DIR}/database.py" "${PROJECT_DIR}/seed.py" "${PROJECT_DIR}/controllers" \
+    "${PROJECT_DIR}/models" "${PROJECT_DIR}/repositories" "${PROJECT_DIR}/routes" \
+    "${PROJECT_DIR}/services" "${PROJECT_DIR}/utils" "${WORK_DIR}/"
 
 (
     cd "${WORK_DIR}"
@@ -68,7 +64,7 @@ echo "SEED: passed in isolated temporary database"
 
 (
     cd "${WORK_DIR}"
-    setsid "${PYTHON_BIN}" app.py >"${LOG_FILE}" 2>&1 &
+    PORT="${PORT}" HOST="127.0.0.1" setsid "${PYTHON_BIN}" app.py >"${LOG_FILE}" 2>&1 &
     echo "$!" >"${TMP_DIR}/app.pid"
 )
 APP_PID="$(<"${TMP_DIR}/app.pid")"
@@ -107,11 +103,12 @@ def shape(value):
     return {"type": type(value).__name__}
 
 
-def request(label, method, path, expected_status, payload=None):
+def request(label, method, path, expected_status, payload=None, headers=None):
     response = requests.request(
         method,
         base_url + path,
         json=payload,
+        headers=headers,
         timeout=5,
     )
     try:
@@ -146,8 +143,12 @@ created_user = request(
         "role": "user",
     },
 )
+if "password" in created_user:
+    failures.append("create user: password leaked in response")
 user_id = created_user["id"]
-request("get user", "GET", f"/users/{user_id}", 200)
+fetched_user = request("get user", "GET", f"/users/{user_id}", 200)
+if "password" in fetched_user:
+    failures.append("get user: password leaked in response")
 request(
     "update user",
     "PUT",
@@ -163,6 +164,16 @@ request(
     200,
     {"email": "joao@email.com", "password": "1234"},
 )
+admin_login = request(
+    "admin login",
+    "POST",
+    "/login",
+    200,
+    {"email": "joao@email.com", "password": "1234"},
+)
+if "password" in admin_login.get("user", {}):
+    failures.append("admin login: password leaked in response")
+admin_headers = {"Authorization": f"Bearer {admin_login['token']}"}
 request(
     "invalid login",
     "POST",
@@ -219,9 +230,12 @@ request("summary report", "GET", "/reports/summary", 200)
 request("user report", "GET", "/reports/user/1", 200)
 request("missing user report", "GET", "/reports/user/999", 404)
 
-request("delete task", "DELETE", f"/tasks/{task_id}", 200)
-request("delete category", "DELETE", f"/categories/{category_id}", 200)
-request("delete user", "DELETE", f"/users/{user_id}", 200)
+request("anonymous delete task", "DELETE", f"/tasks/{task_id}", 401)
+request("anonymous delete category", "DELETE", f"/categories/{category_id}", 401)
+request("anonymous delete user", "DELETE", f"/users/{user_id}", 401)
+request("authorized delete task", "DELETE", f"/tasks/{task_id}", 200, headers=admin_headers)
+request("authorized delete category", "DELETE", f"/categories/{category_id}", 200, headers=admin_headers)
+request("authorized delete user", "DELETE", f"/users/{user_id}", 200, headers=admin_headers)
 
 if failures:
     raise SystemExit("; ".join(failures))

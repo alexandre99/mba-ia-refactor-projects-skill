@@ -184,3 +184,69 @@ Application files such as `app.py`, `database.py`, `seed.py`, `models/*.py`, `ro
 Phase 3 was not started. No refactoring, final disposition matrix, or finding closure was claimed. The next action requires explicit approval in this same session.
 
 Proceed with Phase 3 refactoring? [y/n]
+
+## Phase 3 — Refactoring execution
+
+Approval received in the same session: `y`. The application was changed only after that approval.
+
+### Implementation milestones
+
+1. Added environment-backed configuration and an application factory (`config.py`, `app.py:13-38`), removed import-time schema creation, added explicit `wsgi.py`, and made production fail closed for missing secrets or accidental `python app.py` startup.
+2. Added signed bearer tokens and admin authorization (`auth.py:9-42`), changed destructive endpoints to require admin access, replaced MD5 with Werkzeug password hashing, and removed password material from user serializers.
+3. Split category/report route concerns and extracted `controllers/`, `services/`, `repositories/`, `utils/validation.py`, and `repositories/unit_of_work.py`. Routes now parse transport input and delegate; ORM/session operations are outside `routes/` and `controllers/`.
+4. Reworked task/report aggregation to use eager/select-in loading, consolidated validation, moved commits/rollback into service transaction helpers, and made `seed.py:13-57` one transactional workflow.
+5. Updated the deterministic validator for the new support modules, configurable port, password non-disclosure, anonymous 401, and authorized admin deletion. Added `scripts/validation/validate-findings.py` for security, rollback, seed, and query-count proof.
+
+### Commands and exit codes
+
+| Command | Exit | Result |
+|---|---:|---|
+| `rtk bash -lc 'python3 -m compileall -q .'` | 0 | compile check passed during implementation |
+| `rtk rg -n "\.query|db\.session|db\.or_" routes controllers` | 1/no matches | route/controller persistence coupling removed |
+| `rtk rg -n "hashlib\.md5|super-secret-key-123|senha123|taskmanager@gmail.com" . -g '*.py' -g '!scripts/**'` | 1/no matches | old password/secret literals removed |
+| isolated app import with `create_app({'TESTING': True})` | 0 | factory imported and registered 22 application routes |
+| `APP_ENV=production SECRET_KEY= /tmp/task-manager-api-phase3.oZMGVh/venv/bin/python -c 'from app import app'` | 1 | expected missing-secret fail-closed guard |
+| factory import from an empty temporary directory | 0 | no `instance/` database directory created during import |
+| initial parallel install attempt | 127 | recorded race: install started before venv creation |
+| sequential `/tmp/task-manager-api-phase3.oZMGVh/venv/bin/python -m pip install -r requirements.txt` | 0 | isolated dependencies installed |
+| `/tmp/task-manager-api-phase3.oZMGVh/venv/bin/ruff check --select I,F401,F841 ... --fix` | 0 | mechanical import/dead-code cleanup; 18 fixes |
+| `/tmp/task-manager-api-phase3.oZMGVh/venv/bin/ruff check app.py auth.py config.py controllers models repositories routes services utils seed.py wsgi.py` | 0 | full Ruff check passed |
+| `python3 -m compileall -q .` | 0 | final syntax check passed |
+| `APP_ENV=production SECRET_KEY=validation-secret /tmp/task-manager-api-phase3.oZMGVh/venv/bin/python -c 'from wsgi import app; assert app.debug is False'` | 0 | production WSGI import passed |
+| `APP_ENV=production SECRET_KEY=validation-secret /tmp/task-manager-api-phase3.oZMGVh/venv/bin/python app.py` | 1 | expected guard prevents development server in production |
+
+An earlier production guard attempt used system `python3` and exited 1 at dependency import (`ModuleNotFoundError: flask`); the authoritative retry used the isolated interpreter above and reached the intended guard.
+
+### Post-change boot and endpoint validation
+
+| Command | Exit | Result |
+|---|---:|---|
+| `rtk bash -lc 'PYTHON_BIN=/tmp/task-manager-api-phase3.oZMGVh/venv/bin/python bash scripts/validation/validate-task-manager-api.sh'` | 0 | booted `python app.py` on port 5000; all 22 route patterns plus negative/auth probes passed |
+| `rtk bash -lc 'PYTHON_BIN=/tmp/task-manager-api-phase3.oZMGVh/venv/bin/python PORT=5053 bash scripts/validation/validate-task-manager-api.sh'` | 0 | configurable-port boot passed with the same endpoint contract |
+| `rtk bash -lc 'PYTHONPATH=/home/alexandredev/fullcycle-mba/mba-ia-refactor-projects-skill/task-manager-api /tmp/task-manager-api-phase3.oZMGVh/venv/bin/python scripts/validation/validate-findings.py'` | 0 | security/password/rollback/seed/query checks passed: task 1, report 5, category 2 queries |
+
+The post-change validator observed these deliberate security differences from the captured baseline: anonymous DELETE task/category/user returned 401; the signed admin token returned 200; user create/get/login response shapes omitted `password`. All non-security endpoint paths and success statuses remained operational. Both validator runs reported `ENDPOINTS: all baseline probes passed` and `CLEANUP: temporary project, database, log, and process removed`.
+
+### Finding disposition matrix
+
+| Finding | Disposition | Validation evidence | Remaining risk |
+|---|---|---|---|
+| `SEC-002` | `RESOLVED` | anonymous DELETE 401, row counts unchanged; admin DELETE 200 in `validate-findings.py` | admin-only authorization, no per-resource ownership policy |
+| `SEC-004` | `RESOLVED` | response password assertions, generated hash/check, full smoke | legacy MD5 rows need password reset/migration; no legacy verifier remains |
+| `SEC-003` | `RESOLVED` | old-literal scan empty; missing production secret exits 1 | rotate credentials exposed by the old revision |
+| `OPS-001` | `RESOLVED` | production WSGI import, production app guard, factory no-side-effect probe, ports 5000/5053 | external WSGI process must be supplied in deployment |
+| `ARCH-001` | `RESOLVED` | split route modules, controller/service/repository boundaries, full smoke | shared Flask-SQLAlchemy extension remains a deliberate composition choice |
+| `ARCH-002` | `RESOLVED` | routes contain transport/delegation only; service and endpoint checks passed | no separate external test suite was introduced |
+| `ARCH-003` | `RESOLVED` | ORM/session grep returned no route/controller matches; repository tests/probes passed | repositories still wrap the global extension |
+| `PERF-001` | `RESOLVED` | query event counts: task 1, report 5, category 2 | new report dimensions require query-count review |
+| `QUAL-001` | `RESOLVED` | centralized validation plus finding-specific checks and Ruff | compatibility helper preserves old helper name |
+| `DATA-002` | `RESOLVED` | injected after-flush seed failure preserved pre-seed counts; one commit in seed | schema creation is separate setup before the transaction |
+| `QUAL-004` | `RESOLVED` | full Ruff, compileall, import cleanup, no runtime prints in audited modules | logging can be expanded for production observability |
+
+### Cleanup and final closure
+
+The temporary venv, temporary cloned projects, logs, databases, pycache, and empty factory-probe directory were removed with an explicit temporary-path cleanup command. Final checks showed no target process and no listener on ports 5000 or 5053. `rtk git diff --check` exited 0.
+
+## `PHASE 3: REFACTORING COMPLETE`
+
+The application booted, the assignment endpoint validation passed, all finding-specific validations passed, and the final finding-closure gate passed. No intentional security contract change remains undocumented.
