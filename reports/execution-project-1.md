@@ -33,7 +33,7 @@ requirements.txt:1-2 declares flask==3.1.1 and flask-cors==5.0.1. No dependency 
 
 ## Startup command and inventory evidence
 
-At the pre-refactoring baseline, the correct legacy command was documented in README.md:7-10 as python app.py. app.py:80-88 initializes the database and calls app.run(host="0.0.0.0", port=5000, debug=True). Routes are declared in app.py:11-30, app.py:32-45, app.py:47-78; handlers are in controllers.py:5-292.
+At the pre-refactoring baseline, the correct legacy command is documented in the current README's `Como Executar` section (`README.md:224-231`) as `python app.py`. app.py:80-88 initializes the database and calls app.run(host="0.0.0.0", port=5000, debug=True). Routes are declared in app.py:11-30, app.py:32-45, app.py:47-78; handlers are in controllers.py:5-292.
 
 At the pre-refactoring baseline, the validation script at ../scripts/validation/validate-code-smells.sh:1-35 used bare python, fixed port 5000, relative loja.db, and probed only /health, / and /produtos. To preserve the original tree, it was run from a temporary copy of the same source/script with project .venv/bin first in PATH; no activation or installation was used. The script was made configurable and isolated during Phase 3, as recorded below.
 

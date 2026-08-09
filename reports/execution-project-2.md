@@ -125,7 +125,7 @@ Only after the independent report body was complete, the manual section was insp
 
 | Command | Exit | Result |
 |---|---:|---|
-| `rtk sed -n '1,180p' ../README.md` | 0 | Read manual Project 2 analysis at `../README.md:29-41`. |
+| `rtk sed -n '1,180p' ../README.md` | 0 | Read manual Project 2 analysis at `../README.md:47-60`. |
 | `rtk sed -n '1,90p' ../reports/audit-project-1.md` | 0 | Read an existing report only to preserve the repository's comparison/evidence convention; it did not supply Project 2 findings. |
 
 Comparison result: 8 manual findings; 6/8 rediscovered semantically (5 integral, 1 partial); 2 not rediscovered (cryptic variables and mutable global state). The partial match was the manual card/gateway logging item: the independent `SEC-003` finding cites the payment key in the checkout log, while the catalog has no dedicated sensitive-financial-logging rule and no separate card-logging finding was created. Additional independent findings without a direct manual equivalent: `SEC-002`, `SEC-004`, `ARCH-003`, and `QUAL-002`. `TEST-001` was retained as a historical pre-gate finding and resolved in the validation area before Phase 3.

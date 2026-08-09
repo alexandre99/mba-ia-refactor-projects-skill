@@ -16,12 +16,67 @@ Avaliar se uma skill do Codex consegue conduzir uma refatoração arquitetural r
 
 Foram avaliadas três aplicações: `code-smells-project` (Python/Flask, e-commerce), `ecommerce-api-legacy` (Node.js/Express, LMS/checkout) e `task-manager-api` (Python/Flask, tarefas e relatórios). A metodologia teve quatro momentos:
 
-1. análise manual inicial, mantida no histórico do README e usada somente para comparação posterior;
+1. análise manual inicial, preservada explicitamente nesta seção e usada somente para comparação posterior;
 2. execução da versão corrente da `refactor-arch` nas Fases 1 e 2, com inventário e auditoria independente;
 3. gate explícito de aprovação humana e Fase 3 incremental, com preservação de rotas, status e shapes salvo correção de segurança documentada;
 4. validação final por aplicação e matriz de disposition, incluindo provas específicas para segurança, transação, rollback, erros, efeitos externos e N+1 quando aplicável.
 
 A skill usa um `SKILL.md` e sete referências especializadas: `project-analysis.md`, `anti-pattern-catalog.md`, `audit-report-template.md`, `mvc-guidelines.md`, `refactoring-playbook.md`, `validation-playbook.md` e `finding-resolution.md`. As cópias completas ficam em `.codex/skills/refactor-arch/` dentro de cada projeto.
+
+## Análise Manual
+
+Esta análise foi realizada antes da refatoração e é o baseline humano original do desafio. Ela permanece separada dos findings produzidos posteriormente pela skill; as evidências abaixo não foram reescritas para coincidir com as auditorias automatizadas. Os paths e números de linha são evidência histórica do código pré-refatoração.
+
+### Projeto 1 — `code-smells-project`
+
+Stack: Python, Flask e SQLite. Domínio: e-commerce com produtos, usuários, pedidos e relatórios.
+
+| Severidade | Problema | Evidência | Por que é relevante |
+|---|---|---|---|
+| CRITICAL | Endpoint de execução arbitrária de SQL | `app.py:61-80` | Permite leitura, alteração ou destruição completa do banco por uma requisição não autenticada. |
+| CRITICAL | SQL Injection por concatenação | `models.py:45-63`, `107-131`, `287-301` | Valores controlados pelo cliente são concatenados diretamente em queries. |
+| HIGH | God module com múltiplos domínios | `models.py:1-316` | Produtos, usuários, autenticação, pedidos, estoque, relatórios e SQL estão acoplados no mesmo módulo. |
+| MEDIUM | Queries N+1 ao carregar pedidos | `models.py:173-235` | Cada pedido busca itens e cada item busca novamente o produto. |
+| MEDIUM | Validação duplicada | `controllers.py:26-98` | Regras de produto se repetem entre criação e atualização e podem divergir. |
+| MEDIUM | Tratamento amplo de exceções | `controllers.py:7-294` | Erros internos são expostos ao cliente e não existe contrato centralizado. |
+| LOW | Magic values em regras de negócio | `controllers.py:54-56`, `models.py:258-264` | Categorias e faixas de desconto ficam difíceis de descobrir e alterar. |
+| LOW | Logging com `print` | `controllers.py:10-13`, `210-212` | Não há nível, contexto ou estrutura adequada para observabilidade. |
+
+Relatório: `reports/audit-project-1.md`.
+
+### Projeto 2 — `ecommerce-api-legacy`
+
+Stack: Node.js, Express e SQLite. Domínio: LMS com checkout, matrícula, pagamento e relatório financeiro.
+
+| Severidade | Problema | Evidência | Por que é relevante |
+|---|---|---|---|
+| CRITICAL | Credenciais e chave de pagamento hardcoded | `src/utils.js:1-8` | Segredos ficam expostos no código-fonte e em qualquer cópia do repositório. |
+| CRITICAL | Dados de cartão e chave do gateway em logs | `src/AppManager.js:45-50` | Expõe dados financeiros sensíveis e credenciais operacionais. |
+| HIGH | God Class `AppManager` | `src/AppManager.js:6-143` | A mesma classe cria banco, registra rotas, executa checkout, gera relatórios e deleta usuários. |
+| MEDIUM | Checkout sem transação | `src/AppManager.js:45-65` | Falhas intermediárias podem deixar matrícula, pagamento e auditoria inconsistentes. |
+| MEDIUM | N+1 no relatório financeiro | `src/AppManager.js:82-130` | Cada curso busca matrículas e cada matrícula busca usuário e pagamento. |
+| MEDIUM | Callback pyramid e erros inconsistentes | `src/AppManager.js:39-79`, `85-130` | O fluxo assíncrono é difícil de testar e alguns erros são ignorados. |
+| LOW | Variáveis crípticas | `src/AppManager.js:30-35` | Nomes como `u`, `e`, `p`, `cid` e `cc` escondem significado de domínio. |
+| LOW | Estado global mutável | `src/utils.js:11-17` | Cache global cria acoplamento oculto e vazamento entre testes/processos. |
+
+Relatório: `reports/audit-project-2.md`.
+
+### Projeto 3 — `task-manager-api`
+
+Stack: Python, Flask, Flask-SQLAlchemy e SQLite. Domínio: usuários, tarefas, categorias e relatórios.
+
+| Severidade | Problema | Evidência | Por que é relevante |
+|---|---|---|---|
+| CRITICAL | Token de autenticação previsível | `routes/user_routes.py:187-213` | O token `fake-jwt-token-<id>` pode ser forjado sem assinatura, expiração ou verificação. |
+| HIGH | Secret hardcoded e debug habilitado | `app.py:13-16`, `35-36` | Configuração insegura pode chegar a ambientes não locais. |
+| HIGH | Rotas continuam concentrando negócio e persistência | `routes/task_routes.py:13-301`, `routes/user_routes.py:12-213` | A separação existente é apenas parcial; os blueprints ainda são fat controllers. |
+| MEDIUM | N+1 na listagem de tarefas | `routes/task_routes.py:13-61` | Cada tarefa pode disparar consultas separadas de usuário e categoria. |
+| MEDIUM | API legada/deprecated do SQLAlchemy | `routes/task_routes.py:44`, `53`, `69`; `routes/user_routes.py:31`, `96` | `Model.query.get()` deve migrar para `Session.get()` no SQLAlchemy 2.x. |
+| MEDIUM | Serialização e cálculo de atraso duplicados | `routes/task_routes.py:18-61`, `67-83`; `routes/user_routes.py:155-185` | A mesma regra é reimplementada em rotas diferentes. |
+| LOW | Imports não utilizados | `app.py:9`, `routes/task_routes.py:8-9` | Aumentam ruído e escondem dependências reais. |
+| LOW | Políticas como magic literals | `routes/task_routes.py:112-116`, `178-185`; `routes/user_routes.py:73-74` | Status, prioridade e roles podem divergir entre fluxos. |
+
+Relatório: `reports/audit-project-3.md`.
 
 ## Evolução da skill após o Projeto 2
 
@@ -36,6 +91,28 @@ Com base nessa evidência, a skill foi fortalecida para:
 - exigir matriz final completa antes de declarar conclusão.
 
 As três cópias da skill e de suas referências foram então mantidas sincronizadas. O Projeto 2 foi reavaliado pela versão consolidada antes da execução final do Projeto 3.
+
+## Comparação estrutural Antes/Depois
+
+As tabelas mostram somente as fronteiras principais observadas; não são árvores completas de arquivos.
+
+### Projeto 1 — `code-smells-project`
+
+| Antes | Depois |
+|---|---|
+| `app.py` misturava bootstrap, rotas e configuração; `controllers.py` concentrava transporte, negócio e efeitos; `models.py` reunia domínios, SQL e relatórios. | `app.py` é composition root/factory; controllers fazem parsing e response mapping; `services/` orquestra workflows; `repositories/` concentra SQL/persistência; `models.py` permanece apenas como facade de compatibilidade. |
+
+### Projeto 2 — `ecommerce-api-legacy`
+
+| Antes | Depois |
+|---|---|
+| `src/AppManager.js` criava banco, registrava rotas, executava checkout, gerava relatório e excluía usuários; `src/utils.js` mantinha configuração/cache globais. | `src/app.js` compõe dependências e `src/server.js` inicia o servidor; `routes.js`/controllers mapeiam HTTP; services possuem workflows; repositories possuem SQL; infrastructure possui adapter/seed; config, middleware e segurança são fronteiras explícitas. |
+
+### Projeto 3 — `task-manager-api`
+
+| Antes | Depois |
+|---|---|
+| `app.py` fazia bootstrap/configuração e rotas; blueprints misturavam parsing, validação, ORM, cálculos, commits e serialização. | `create_app()`/configuração/WSGI compõem a aplicação; routes são wrappers de transporte; controllers/services possuem orquestração e regras; repositories possuem ORM e unit of work; response mapping é centralizado. |
 
 ## Execução dos três projetos
 
@@ -65,11 +142,121 @@ O baseline primeiro registrou a limitação do validator original (`python` indi
 
 As validações finais passaram em portas 5000 e 5053, incluindo boot, todos os endpoints, 401 anônimo, 200 autorizado, rollback, seed, contagem de queries, Ruff, compileall e guards de produção. Nenhum finding permaneceu parcial ou não tratado. Mudanças de segurança documentadas: DELETE passou a exigir autorização; tokens passaram a ser assinados; respostas não expõem `password`; e produção exige segredo e WSGI.
 
+## Evidências de execução pós-refatoração
+
+Os trechos abaixo são transcrições curtas dos resultados já registrados nos execution reports; esta consolidação não executou novamente aplicações ou validators.
+
+### Projeto 1
+
+```text
+validate-code-smells-endpoints.py | exit 0 | 19 original paths plus security probes passed against an isolated in-memory database.
+validate-code-smells.sh | exit 0 | Official isolated boot/smoke validation passed on port 5002.
+```
+
+### Projeto 2
+
+```text
+validate-ecommerce-legacy.sh | exit 0 | Dependency installation/verification, production storage guard, boot, endpoint contracts, rollback/commit/cache/error probes, and cleanup passed.
+PORT=3017 ... validate-ecommerce-legacy.sh | exit 0 | Same complete validation passed on a configurable non-default port.
+```
+
+### Projeto 3
+
+```text
+validate-task-manager-api.sh | exit 0 | All endpoint probes, anonymous 401 checks, authorized 200 checks, and cleanup passed.
+ENDPOINTS: all baseline probes passed
+CLEANUP: temporary project, database, log, and process removed
+```
+
 ## Resultados consolidados
 
 Nas matrizes finais atuais há 32 findings distintos entre os três escopos: 27 `RESOLVED` e 5 `PARTIALLY_RESOLVED`, todos MEDIUM/LOW. Não há `CRITICAL` ou `HIGH` com disposition `PARTIALLY_RESOLVED` ou `NOT_ADDRESSED`. Não há `ACCEPTED_RISK` sem aprovação explícita registrada.
 
 Os contratos não relacionados a segurança foram preservados nos três projetos: paths, métodos, status de sucesso e shapes observados nos baselines. As exceções estão listadas nos relatórios de execução e nas seções de mudanças contratuais acima.
+
+## Como Executar
+
+### Pré-requisitos
+
+- OpenAI Codex instalado e configurado/autenticado;
+- Python compatível e dependências Flask dos projetos Python;
+- Node.js, npm e dependências do projeto Express;
+- `curl` e os comandos usados pelos validators (`mktemp`, `setsid` no validator específico do Projeto 3).
+
+### Sincronizar e verificar a skill
+
+Na raiz do repositório, os scripts oficiais existentes são:
+
+```bash
+bash scripts/sync-refactor-skill.sh
+bash scripts/verify-refactor-skill.sh
+```
+
+O primeiro copia a skill canônica de `code-smells-project/.codex/skills/refactor-arch/` para os outros dois projetos; o segundo compara recursivamente as três cópias.
+
+### Abrir a sessão correta e executar Fases 1 e 2
+
+Abra uma nova sessão do Codex na raiz de cada projeto, uma por vez, e use o prompt mínimo abaixo. O prompt exige inventário, auditoria, relatório e parada no gate; ele não autoriza a Fase 3.
+
+```text
+Use obrigatoriamente a skill refactor-arch neste projeto. Execute somente as Fases 1 e 2, gere o relatório de auditoria e as evidências com arquivo/linha exatos, preserve o contrato observado e pare no gate humano antes de editar qualquer arquivo da aplicação.
+```
+
+Sessões e diretórios:
+
+```bash
+cd code-smells-project
+# abrir a sessão Codex neste diretório e enviar o prompt mínimo
+
+cd ../ecommerce-api-legacy
+# abrir uma nova sessão Codex neste diretório e enviar o mesmo prompt
+
+cd ../task-manager-api
+# abrir uma nova sessão Codex neste diretório e enviar o mesmo prompt
+```
+
+Depois de cada Fase 2, revise o audit report, confirme que não houve alteração prematura e responda explicitamente `y` ao gate na mesma sessão. Só então envie:
+
+```text
+Aprovo explicitamente a Fase 3 para este projeto. Execute a refatoração incremental prevista, preserve rotas/status/shapes salvo as mudanças de segurança documentadas, rode o validator aplicável e registre boot, endpoints, validações específicas, cleanup e dispositions sem inventar resultados.
+```
+
+### Startup e validators
+
+Os comandos de startup históricos registrados são `python app.py` para os projetos Flask e `npm start` para `ecommerce-api-legacy`. Para validação determinística, use os scripts existentes:
+
+```bash
+bash scripts/validation/validate-code-smells.sh
+bash scripts/validation/validate-ecommerce-legacy.sh
+bash task-manager-api/scripts/validation/validate-task-manager-api.sh
+```
+
+Também existe `bash scripts/validation/run-all.sh`; ele delega aos três scripts de validação da raiz, incluindo o smoke validator original de `task-manager-api`. O relatório do Projeto 3 registra a limitação desse validator original e a execução aprovada do validator específico `task-manager-api/scripts/validation/validate-task-manager-api.sh`; portanto essa diferença deve permanecer explícita.
+
+### Consultar os relatórios
+
+Os resultados detalhados estão nos pares abaixo:
+
+- [Auditoria e execução do Projeto 1](reports/audit-project-1.md) · [evidências](reports/execution-project-1.md)
+- [Auditoria e execução do Projeto 2](reports/audit-project-2.md) · [evidências](reports/execution-project-2.md)
+- [Auditoria e execução do Projeto 3](reports/audit-project-3.md) · [evidências](reports/execution-project-3.md)
+
+Para inspeção textual, os relatórios também foram consultados historicamente com `rtk sed -n '1,260p' reports/<arquivo>.md`.
+
+## Checklist final por projeto
+
+| Requisito | Projeto 1 — `code-smells-project` | Projeto 2 — `ecommerce-api-legacy` | Projeto 3 — `task-manager-api` |
+|---|---|---|---|
+| Stack detectada | ✅ Python + Flask + SQLite | ✅ Node.js + Express + SQLite | ✅ Python + Flask + Flask-SQLAlchemy + SQLite |
+| Mínimo de findings na Fase 2 | ✅ 16 findings na matriz final | ✅ 5 findings atuais na reavaliação; histórico preservado | ✅ 11 findings |
+| CRITICAL/HIGH | ✅ findings CRITICAL/HIGH no relatório | ✅ histórico com CRITICAL/HIGH; reavaliação atual com HIGH | ✅ 1 CRITICAL e 6 HIGH |
+| Comparação com análise manual | ✅ 8/8 redescobertos semanticamente | ⚠️ histórico: 6/8; reavaliação: 1/8 após o primeiro ciclo | ⚠️ a comparação histórica ocorreu quando o README ainda não enumerava findings; o baseline manual foi restaurado nesta consolidação sem alterar a auditoria |
+| Gate humano | ✅ aprovação `y` antes da Fase 3 | ✅ aprovação `y` antes das mudanças | ✅ aprovação `y` antes das mudanças |
+| MVC/refatoração | ✅ composition root, controllers, services e repositories | ✅ composition root, routes/controllers, services, repositories e infrastructure | ✅ factory/WSGI, routes, controllers, services e repositories |
+| Boot | ✅ boot isolado e smoke em porta 5002 | ✅ boot padrão e porta 3017 | ✅ boot em portas 5000 e 5053 |
+| Endpoints | ✅ 19 paths originais | ✅ contratos de checkout, relatório e exclusão | ✅ 22 padrões de rota e probes negativos |
+| Validações específicas | ⚠️ matriz completa passou; `PERF-001`, `ERR-001`, `QUAL-004` e `QUAL-005` permanecem parciais por provas históricas ausentes | ✅ rollback/commit/cache/error/magic-value probes passaram | ✅ autorização, password, rollback, seed, query-count, Ruff, compileall e guards de produção passaram |
+| Disposition final | ⚠️ 12 `RESOLVED`; 4 `PARTIALLY_RESOLVED` MEDIUM/LOW | ⚠️ 4 `RESOLVED`; `QUAL-005` `PARTIALLY_RESOLVED` | ⚠️ 11 `RESOLVED`; limitações operacionais de hashes legados e WSGI externo permanecem documentadas |
 
 ## Limitações conhecidas e riscos residuais
 
@@ -91,20 +278,18 @@ Os seis relatórios são a fonte de verdade dos comandos e exit codes de cada ex
 
 Cada auditoria contém findings com severidade, regra, arquivo, linhas, evidência, impacto, recomendação e validação; cada execução contém baseline, aprovação, mudanças, contratos, validações e cleanup. O relatório do Projeto 1 agora inclui a matriz final completa; o do Projeto 2 separa histórico e reavaliação; e o do Projeto 3 separa o gate histórico da implementação efetivamente executada.
 
-## Validações da consolidação final — 2026-07-27
+## Validações da consolidação final — 2026-08-09
 
-Foram executadas somente verificações documentais e de consistência:
+Foram executadas somente verificações documentais e de consistência; nenhuma aplicação ou validator de projeto foi iniciado:
 
 - `rtk git diff --check`: exit 0;
-- `rtk diff -rq` entre cada par das três cópias completas da skill: exit 0;
-- existência dos seis relatórios, 24 arquivos de skill/referência (oito em cada cópia) e três READMEs dos projetos: exit 0;
-- links locais do README apontando para os seis relatórios: exit 0;
-- matrizes finais: exit 0, com 16, 5 e 11 rows respectivamente;
-- busca por whitespace final, checklist pendente e frases obsoletas do Projeto 3: exit 1 em cada busca, interpretação esperada de “nenhuma ocorrência”;
-- busca específica por `CRITICAL`/`HIGH` parcial ou não tratado: exit 1, sem ocorrência;
-- `git status --short`: somente README, relatórios e `.codex/napkin.md` modificados.
+- `rtk bash scripts/verify-refactor-skill.sh`: exit 0; três cópias idênticas;
+- verificação das referências documentais e existência dos seis relatórios: exit 0;
+- verificação dos links locais do README: exit 0;
+- verificação de que não há diff em caminhos funcionais das três aplicações: exit 0, conjunto vazio;
+- `rtk git status --short`: somente README, relatórios e referências da skill sincronizadas modificados.
 
-Nenhuma aplicação, validator de projeto, boot, endpoint ou fase da skill foi executado nesta consolidação.
+Não foram executados novamente validators, boot, endpoints, Fases 1/2/3 ou qualquer experimento nesta consolidação.
 
 ## Estado final do experimento
 

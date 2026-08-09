@@ -157,7 +157,7 @@ The report contains exact file/line evidence, impact, recommendation, and execut
 10. `DATA-002`: separate seed commits without one atomic boundary.
 11. `QUAL-004`: unused imports and ad-hoc exception/operation prints.
 
-After the findings and report were complete, the README comparison was performed with `rtk sed -n '1,260p' README.md` (exit 0). It enumerates no concrete manual findings, so manual findings enumerated and independently rediscovered are both 0. No README finding was copied.
+After the findings and report were complete, the README comparison was performed with `rtk sed -n '1,260p' README.md` (exit 0). The historical comparison recorded no concrete manual findings because the manual section was absent at that point. The final documentary correction restores the original eight-finding baseline at `README.md:64-79` without changing the independent findings or execution results. No README finding was copied.
 
 ### Report generation and integrity checks
 

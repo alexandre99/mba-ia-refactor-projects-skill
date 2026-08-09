@@ -191,7 +191,7 @@ The following inventory was derived from route decorators and verified against t
 
 ## README comparison
 
-After the independent findings were completed, `README.md` was compared as a manual-analysis source. It describes the project and says that architectural/quality problems exist, but enumerates no concrete findings. Manual findings enumerated: 0. Independently rediscovered: 0. No finding was copied from the README or the stale report.
+After the independent findings were completed, `README.md` was compared as a manual-analysis source. The historical comparison recorded zero concrete findings because the manual section was absent at that point. The final documentary correction restores the original eight-finding baseline at `README.md:64-79` without changing this audit's independent findings, evidence, or dispositions. No finding was copied from the README or the stale report.
 
 ## Proposed Phase 3 plan
 

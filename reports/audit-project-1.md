@@ -27,7 +27,7 @@ O catálogo completo foi cruzado. `DEP-001` não foi registrado: as únicas vers
 
 ## Comparação com a análise manual
 
-A seção independente foi lida somente após a auditoria, em `README.md:12-29`, sem alterar os findings já produzidos.
+A seção independente foi lida somente após a auditoria, em `README.md:26-79`, sem alterar os findings já produzidos.
 
 - Findings manuais: 8
 - Findings manuais reencontrados semanticamente: 8
