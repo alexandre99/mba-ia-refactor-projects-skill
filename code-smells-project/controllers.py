@@ -1,292 +1,176 @@
-from flask import request, jsonify
-import models
-from database import get_db
+from flask import current_app, jsonify, request
+
+from errors import ApplicationError, ValidationError
+from services import admin_service, health_service, order_service, product_service, user_service
+
+
+def _run(operation, success_status=200):
+    try:
+        return jsonify(operation()), success_status
+    except ApplicationError as error:
+        return jsonify(error.payload), error.status_code
+
 
 def listar_produtos():
-    try:
-        produtos = models.get_todos_produtos()
-        print("Listando " + str(len(produtos)) + " produtos")
-        return jsonify({"dados": produtos, "sucesso": True}), 200
-    except Exception as e:
-        print("ERRO: " + str(e))
-        return jsonify({"erro": str(e)}), 500
+    return _run(lambda: {"dados": product_service.list_products(), "sucesso": True})
+
 
 def buscar_produto(id):
-    try:
-        produto = models.get_produto_por_id(id)
-        if produto:
-            return jsonify({"dados": produto, "sucesso": True}), 200
-        else:
-            return jsonify({"erro": "Produto não encontrado", "sucesso": False}), 404
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+    def operation():
+        produto = product_service.get_product(id)
+        if produto is None:
+            raise ApplicationError(
+                "Produto não encontrado",
+                status_code=404,
+                payload={"erro": "Produto não encontrado", "sucesso": False},
+            )
+        return {"dados": produto, "sucesso": True}
+
+    return _run(operation)
+
 
 def criar_produto():
-    try:
-        dados = request.get_json()
+    return _run(
+        lambda: {
+            "dados": {"id": product_service.create_product(request.get_json(silent=True))},
+            "sucesso": True,
+            "mensagem": "Produto criado",
+        },
+        success_status=201,
+    )
 
-        if not dados:
-            return jsonify({"erro": "Dados inválidos"}), 400
-        if "nome" not in dados:
-            return jsonify({"erro": "Nome é obrigatório"}), 400
-        if "preco" not in dados:
-            return jsonify({"erro": "Preço é obrigatório"}), 400
-        if "estoque" not in dados:
-            return jsonify({"erro": "Estoque é obrigatório"}), 400
-
-        nome = dados["nome"]
-        descricao = dados.get("descricao", "")
-        preco = dados["preco"]
-        estoque = dados["estoque"]
-        categoria = dados.get("categoria", "geral")
-
-        if preco < 0:
-            return jsonify({"erro": "Preço não pode ser negativo"}), 400
-        if estoque < 0:
-            return jsonify({"erro": "Estoque não pode ser negativo"}), 400
-        if len(nome) < 2:
-            return jsonify({"erro": "Nome muito curto"}), 400
-        if len(nome) > 200:
-            return jsonify({"erro": "Nome muito longo"}), 400
-
-        categorias_validas = ["informatica", "moveis", "vestuario", "geral", "eletronicos", "livros"]
-        if categoria not in categorias_validas:
-            return jsonify({"erro": "Categoria inválida. Válidas: " + str(categorias_validas)}), 400
-
-        id = models.criar_produto(nome, descricao, preco, estoque, categoria)
-        print("Produto criado com ID: " + str(id))
-        return jsonify({"dados": {"id": id}, "sucesso": True, "mensagem": "Produto criado"}), 201
-
-    except Exception as e:
-        print("ERRO ao criar produto: " + str(e))
-        return jsonify({"erro": str(e)}), 500
 
 def atualizar_produto(id):
-    try:
-        dados = request.get_json()
+    def operation():
+        if not product_service.update_product(id, request.get_json(silent=True)):
+            raise ApplicationError("Produto não encontrado", status_code=404)
+        return {"sucesso": True, "mensagem": "Produto atualizado"}
 
-        produto_existente = models.get_produto_por_id(id)
-        if not produto_existente:
-            return jsonify({"erro": "Produto não encontrado"}), 404
+    return _run(operation)
 
-        if not dados:
-            return jsonify({"erro": "Dados inválidos"}), 400
-        if "nome" not in dados:
-            return jsonify({"erro": "Nome é obrigatório"}), 400
-        if "preco" not in dados:
-            return jsonify({"erro": "Preço é obrigatório"}), 400
-        if "estoque" not in dados:
-            return jsonify({"erro": "Estoque é obrigatório"}), 400
-
-        nome = dados["nome"]
-        descricao = dados.get("descricao", "")
-        preco = dados["preco"]
-        estoque = dados["estoque"]
-        categoria = dados.get("categoria", "geral")
-
-        if preco < 0:
-            return jsonify({"erro": "Preço não pode ser negativo"}), 400
-        if estoque < 0:
-            return jsonify({"erro": "Estoque não pode ser negativo"}), 400
-
-        models.atualizar_produto(id, nome, descricao, preco, estoque, categoria)
-        return jsonify({"sucesso": True, "mensagem": "Produto atualizado"}), 200
-
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 def deletar_produto(id):
-    try:
+    def operation():
+        if not product_service.delete_product(id):
+            raise ApplicationError("Produto não encontrado", status_code=404)
+        return {"sucesso": True, "mensagem": "Produto deletado"}
 
-        produto = models.get_produto_por_id(id)
-        if not produto:
-            return jsonify({"erro": "Produto não encontrado"}), 404
+    return _run(operation)
 
-        models.deletar_produto(id)
-        print("Produto " + str(id) + " deletado")
-        return jsonify({"sucesso": True, "mensagem": "Produto deletado"}), 200
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 def buscar_produtos():
-    try:
-        termo = request.args.get("q", "")
-        categoria = request.args.get("categoria", None)
-        preco_min = request.args.get("preco_min", None)
-        preco_max = request.args.get("preco_max", None)
+    def operation():
+        resultados = product_service.search_products(request.args)
+        return {"dados": resultados, "total": len(resultados), "sucesso": True}
 
-        if preco_min:
-            preco_min = float(preco_min)
-        if preco_max:
-            preco_max = float(preco_max)
+    return _run(operation)
 
-        resultados = models.buscar_produtos(termo, categoria, preco_min, preco_max)
-        return jsonify({"dados": resultados, "total": len(resultados), "sucesso": True}), 200
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 def listar_usuarios():
-    try:
-        usuarios = models.get_todos_usuarios()
+    return _run(lambda: {"dados": user_service.list_users(), "sucesso": True})
 
-        return jsonify({"dados": usuarios, "sucesso": True}), 200
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 def buscar_usuario(id):
-    try:
-        usuario = models.get_usuario_por_id(id)
-        if usuario:
-            return jsonify({"dados": usuario, "sucesso": True}), 200
-        else:
-            return jsonify({"erro": "Usuário não encontrado"}), 404
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+    def operation():
+        usuario = user_service.get_user(id)
+        if usuario is None:
+            raise ApplicationError("Usuário não encontrado", status_code=404)
+        return {"dados": usuario, "sucesso": True}
+
+    return _run(operation)
+
 
 def criar_usuario():
-    try:
-        dados = request.get_json()
+    return _run(
+        lambda: {
+            "dados": {"id": user_service.create_user(request.get_json(silent=True))},
+            "sucesso": True,
+        },
+        success_status=201,
+    )
 
-        if not dados:
-            return jsonify({"erro": "Dados inválidos"}), 400
-
-        nome = dados.get("nome", "")
-        email = dados.get("email", "")
-        senha = dados.get("senha", "")
-
-        if not nome or not email or not senha:
-            return jsonify({"erro": "Nome, email e senha são obrigatórios"}), 400
-
-        id = models.criar_usuario(nome, email, senha)
-        print("Usuário criado: " + email)
-        return jsonify({"dados": {"id": id}, "sucesso": True}), 201
-
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 def login():
-    try:
-        dados = request.get_json()
+    def operation():
+        dados = request.get_json(silent=True)
+        if not isinstance(dados, dict):
+            raise ValidationError("Email e senha são obrigatórios")
         email = dados.get("email", "")
         senha = dados.get("senha", "")
-
         if not email or not senha:
-            return jsonify({"erro": "Email e senha são obrigatórios"}), 400
+            raise ValidationError("Email e senha são obrigatórios")
 
-        usuario = models.login_usuario(email, senha)
-        if usuario:
+        usuario = user_service.authenticate(email, senha)
+        if usuario is None:
+            raise ApplicationError(
+                "Email ou senha inválidos",
+                status_code=401,
+                payload={"erro": "Email ou senha inválidos", "sucesso": False},
+            )
+        return {"dados": usuario, "sucesso": True, "mensagem": "Login OK"}
 
-            print("Login bem-sucedido: " + email)
-            return jsonify({"dados": usuario, "sucesso": True, "mensagem": "Login OK"}), 200
-        else:
-            print("Login falhou: " + email)
-            return jsonify({"erro": "Email ou senha inválidos", "sucesso": False}), 401
+    return _run(operation)
 
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 def criar_pedido():
-    try:
-        dados = request.get_json()
-
-        if not dados:
-            return jsonify({"erro": "Dados inválidos"}), 400
-
-        usuario_id = dados.get("usuario_id")
-        itens = dados.get("itens", [])
-
-        if not usuario_id:
-            return jsonify({"erro": "Usuario ID é obrigatório"}), 400
-        if not itens or len(itens) == 0:
-            return jsonify({"erro": "Pedido deve ter pelo menos 1 item"}), 400
-
-        resultado = models.criar_pedido(usuario_id, itens)
-
-        if "erro" in resultado:
-            return jsonify({"erro": resultado["erro"], "sucesso": False}), 400
-
-        print("ENVIANDO EMAIL: Pedido " + str(resultado["pedido_id"]) + " criado para usuario " + str(usuario_id))
-        print("ENVIANDO SMS: Seu pedido foi recebido!")
-        print("ENVIANDO PUSH: Novo pedido recebido pelo sistema")
-
-        return jsonify({
-            "dados": resultado,
+    def operation():
+        dados = request.get_json(silent=True)
+        if not isinstance(dados, dict):
+            raise ValidationError("Dados inválidos")
+        return {
+            "dados": order_service.create_order(dados.get("usuario_id"), dados.get("itens", [])),
             "sucesso": True,
-            "mensagem": "Pedido criado com sucesso"
-        }), 201
+            "mensagem": "Pedido criado com sucesso",
+        }
 
-    except Exception as e:
-        print("ERRO CRITICO ao criar pedido: " + str(e))
-        return jsonify({"erro": str(e)}), 500
+    return _run(operation, success_status=201)
+
 
 def listar_pedidos_usuario(usuario_id):
-    try:
-        pedidos = models.get_pedidos_usuario(usuario_id)
-        return jsonify({"dados": pedidos, "sucesso": True}), 200
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+    return _run(
+        lambda: {"dados": order_service.list_orders_for_user(usuario_id), "sucesso": True}
+    )
+
 
 def listar_todos_pedidos():
-    try:
+    return _run(lambda: {"dados": order_service.list_orders(), "sucesso": True})
 
-        pedidos = models.get_todos_pedidos()
-        return jsonify({"dados": pedidos, "sucesso": True}), 200
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 def atualizar_status_pedido(pedido_id):
-    try:
-        dados = request.get_json()
-        novo_status = dados.get("status", "")
+    def operation():
+        dados = request.get_json(silent=True)
+        if not isinstance(dados, dict):
+            raise ValidationError("Dados inválidos")
+        order_service.update_order_status(pedido_id, dados.get("status", ""))
+        return {"sucesso": True, "mensagem": "Status atualizado"}
 
-        if novo_status not in ["pendente", "aprovado", "enviado", "entregue", "cancelado"]:
-            return jsonify({"erro": "Status inválido"}), 400
+    return _run(operation)
 
-        models.atualizar_status_pedido(pedido_id, novo_status)
-
-        if novo_status == "aprovado":
-            print("NOTIFICAÇÃO: Pedido " + str(pedido_id) + " foi aprovado! Preparar envio.")
-        if novo_status == "cancelado":
-            print("NOTIFICAÇÃO: Pedido " + str(pedido_id) + " cancelado. Devolver estoque.")
-
-        return jsonify({"sucesso": True, "mensagem": "Status atualizado"}), 200
-
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
 
 def relatorio_vendas():
-    try:
-        relatorio = models.relatorio_vendas()
-        return jsonify({"dados": relatorio, "sucesso": True}), 200
-    except Exception as e:
-        return jsonify({"erro": str(e)}), 500
+    return _run(lambda: {"dados": order_service.sales_report(), "sucesso": True})
+
 
 def health_check():
-    try:
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute("SELECT 1")
-        cursor.execute("SELECT COUNT(*) FROM produtos")
-        produtos = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM usuarios")
-        usuarios = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM pedidos")
-        pedidos = cursor.fetchone()[0]
+    return _run(lambda: health_service.get_health(current_app.config["APP_ENV"]))
 
-        return jsonify({
-            "status": "ok",
-            "database": "connected",
-            "counts": {
-                "produtos": produtos,
-                "usuarios": usuarios,
-                "pedidos": pedidos
-            },
 
-            "versao": "1.0.0",
-            "ambiente": "producao",
-            "db_path": "loja.db",
-            "debug": True,
-            "secret_key": "minha-chave-super-secreta-123"
-        }), 200
-    except Exception as e:
-        return jsonify({"status": "erro", "detalhes": str(e)}), 500
+def reset_database():
+    def operation():
+        admin_service.reset_database(
+            request.headers.get("X-Admin-Token"), current_app.config["ADMIN_TOKEN"]
+        )
+        return {"mensagem": "Banco de dados resetado", "sucesso": True}
+
+    return _run(operation)
+
+
+def executar_query():
+    def operation():
+        dados = request.get_json(silent=True)
+        if not isinstance(dados, dict):
+            raise ValidationError("Dados inválidos")
+        rows = admin_service.execute_query(dados.get("sql", ""))
+        return {"dados": rows, "sucesso": True}
+
+    return _run(operation)
