@@ -78,6 +78,66 @@ Stack: Python, Flask, Flask-SQLAlchemy e SQLite. Domínio: usuários, tarefas, c
 
 Relatório: `reports/audit-project-3.md`.
 
+## Construção da Skill
+
+A skill foi construída em `.codex/skills/refactor-arch/`. O arquivo [`SKILL.md`](code-smells-project/.codex/skills/refactor-arch/SKILL.md) funciona como um protocolo executável: define a ordem das fases, as regras de integridade, o formato mínimo das evidências e os gates que impedem declarar sucesso sem prova. As cópias nos três projetos foram mantidas sincronizadas; os relatórios de auditoria e execução continuam sendo a fonte dos achados, mudanças e resultados históricos.
+
+### Decisões de design
+
+O `SKILL.md` foi dividido em três fases sequenciais, com responsabilidades e saídas distintas:
+
+1. **Fase 1 — Análise:** detecta runtime, linguagem, framework, gerenciador de pacotes, banco, testes e comando de inicialização; inventaria endpoints e contratos observáveis; infere o domínio e mapeia responsabilidades reais, incluindo bootstrap, transporte, negócio, persistência, configuração, transações e efeitos externos.
+2. **Fase 2 — Auditoria:** aplica as regras relevantes do catálogo ao código atual, deduplica causas-raiz sem esconder riscos independentes, ordena os findings por severidade e gera o relatório padronizado com arquivo, linhas, evidência, impacto, recomendação e validação específica. A comparação com a análise manual só ocorre depois da auditoria independente.
+3. **Fase 3 — Refatoração e prova:** somente após aprovação, captura o baseline, executa transformações incrementais do playbook, preserva o contrato observado salvo mudanças de segurança documentadas, roda boot/endpoints e provas negativas específicas, reavalia o catálogo e fecha cada finding na matriz de disposition.
+
+As referências complementam o protocolo sem duplicar sua orquestração:
+
+| Referência | Papel na skill |
+|---|---|
+| `project-analysis.md` | Heurísticas de stack, banco, domínio, responsabilidades e inventário de endpoints. |
+| `anti-pattern-catalog.md` | Regras estáveis, sinais de detecção, severidade e critérios de ajuste. |
+| `audit-report-template.md` | Estrutura do relatório da Fase 2, riscos contratuais, gate e matriz final. |
+| `mvc-guidelines.md` | Responsabilidades de Routes/Views, Controllers, Models, Services, Repositories e composition root, com orientações incrementais para Flask e Express. |
+| `refactoring-playbook.md` | Transformações T-001 a T-012, incluindo exemplos antes/depois e salvaguardas para contrato, transação e efeitos externos. |
+| `validation-playbook.md` | Baseline, boot, endpoints, cleanup e validações negativas para segurança, erros, transações, efeitos e N+1. |
+| `finding-resolution.md` | Ciclo de fechamento, dispositions permitidas, evidência exigida e política para não confundir mudança estrutural com resolução. |
+
+O gate humano é explícito: a Fase 2 termina com `Proceed with Phase 3 refactoring? [y/n]`, não altera código da aplicação antes de uma resposta afirmativa na mesma sessão e só então libera a Fase 3. Depois da implementação há ainda um gate de fechamento: um finding só pode ser `RESOLVED` com causa-raiz removida, evidência final e validação capaz de detectar a falha original; validação indisponível ou insuficiente permanece visível como risco/disposition parcial.
+
+### Catálogo de anti-patterns
+
+O catálogo atual contém 21 regras, organizadas por risco e severidade para cobrir o que o desafio pede e o que os três projetos efetivamente exercitam:
+
+- **Segurança crítica:** execução arbitrária de SQL/comandos, administração destrutiva exposta e credenciais/segredos utilizáveis no código.
+- **Arquitetura, segurança operacional e consistência em nível alto:** god class/module, negócio em rotas/controllers, persistência acoplada ao transporte, tratamento inseguro de senhas, defaults de runtime inseguros, ausência de fronteira transacional atômica e efeitos externos antes do commit.
+- **Dados, performance, erros, dependências e prova comportamental em nível médio:** queries dinâmicas, N+1/query-in-loop, regras duplicadas, vazamento de exceções, ausência de safety net e ausência de validação específica para falhas.
+- **Qualidade em nível baixo:** magic values/constantes dispersas, nomes de fronteira enganosos, imports ou diagnósticos mortos e respostas construídas de modo inconsistente.
+
+Essas categorias foram escolhidas para combinar segurança e integridade de dados, separação MVC/SOLID, comportamento de persistência e performance, qualidade de manutenção e confiabilidade da própria validação. O catálogo não força findings: exige evidência de código alcançável, usa IDs estáveis, separa causas-raiz independentes e permite ajustar a severidade somente com justificativa.
+
+Há detecção explícita de **APIs deprecated** em `DEP-001`. Ela só é aplicada quando a versão da dependência ou evidência autoritativa de migração no repositório sustenta o diagnóstico, devendo registrar o equivalente moderno; memória isolada não basta. Isso aparece no Projeto 3 com `Model.query.get()` e a migração recomendada para `Session.get()`. No Projeto 2, a auditoria registrou que não havia evidência autoritativa para criar um finding desse tipo.
+
+### Agnosticidade de tecnologia
+
+A agnosticidade está no método, não em fingir que as stacks são iguais. As heurísticas usam sinais do repositório — arquivos de dependência, imports/construtores, routers, configuração, banco e comandos — e o mapeamento considera a responsabilidade efetiva de cada arquivo, não o nome de uma pasta. Assim, Flask e Express aparecem como sinais e exemplos de integração, não como pré-condição das regras de arquitetura.
+
+O catálogo descreve problemas transferíveis entre linguagens (segredo hardcoded, god module, SQL dinâmico, N+1, transação ausente, erro exposto, API deprecated, magic values). As guidelines definem fronteiras conceituais; o playbook traz exemplos em Python e JavaScript; e os playbooks de validação e resolução exigem provas observáveis, independentemente do framework. Isso permite preservar boas camadas existentes e adaptar a transformação ao projeto, em vez de impor uma árvore de diretórios.
+
+O experimento comprovou essa adaptação nos três alvos: `code-smells-project` e `task-manager-api` são Python/Flask, mas um começa monolítico e o outro já possui organização parcial; `ecommerce-api-legacy` é Node.js/Express e contém o fluxo de checkout. A mesma skill detectou e auditou essas diferenças, conduziu fronteiras MVC incrementais e produziu validações específicas para cada contrato, conforme os relatórios vinculados nas seções de execução e evidências.
+
+### Desafios encontrados e soluções
+
+O aprendizado central veio do Projeto 2. A primeira refatoração estrutural separou rotas, controllers, services e repositories e passou pelo smoke test, mas isso não provava atomicidade do checkout: uma falha intermediária ainda poderia deixar matrícula, pagamento ou auditoria parcialmente persistidos. O episódio está detalhado em [Evolução da skill após o Projeto 2](#evolução-da-skill-após-o-projeto-2); em resumo, a skill evoluiu para:
+
+- manter `DATA-002` separado de um finding genérico de arquitetura;
+- exigir uma transaction boundary/unit of work explícita para as escritas relacionadas;
+- injetar uma falha intermediária e verificar rollback de todas as linhas relacionadas, ausência de cache/efeito externo antes do commit e commit/efeito no caminho de sucesso;
+- exigir validações específicas de rollback, commit, cache, erro e políticas, além da matriz final de disposition.
+
+Na reavaliação consolidada, `DATA-002` e `TEST-002` foram fechados como `RESOLVED`; a matriz atual do Projeto 2 ficou com quatro findings `RESOLVED` e `QUAL-005` `PARTIALLY_RESOLVED` por compatibilidade dos formatos legados. O resultado confirmou que mover código de arquivo não basta para resolver um risco comportamental.
+
+Outros limites comprovados reforçaram a mesma decisão: no Projeto 1, a ausência histórica de provas específicas de contagem de queries, falha inesperada e lint/log manteve quatro findings MEDIUM/LOW parciais; no Projeto 3, a limitação do validator original foi registrada antes de uma validação isolada e específica permitir a cobertura completa. Em ambos os casos, a skill passou a tratar prova ausente como limitação explícita, não como sucesso inferido.
+
 ## Evolução da skill após o Projeto 2
 
 A primeira execução do Projeto 2 mostrou que separar rotas, controllers, services e repositories e passar no smoke test não prova atomicidade. O checkout ainda podia deixar escritas parciais sem que a validação detectasse o defeito.
@@ -123,6 +183,16 @@ As tabelas mostram somente as fronteiras principais observadas; não são árvor
 | 3 — `task-manager-api` | [audit](reports/audit-project-3.md) e [execution](reports/execution-project-3.md) | 11 | 11 `RESOLVED` |
 
 Os números do Projeto 2 são da reavaliação final. O mesmo relatório preserva, antes dela, a auditoria e a execução históricas do primeiro ciclo; findings históricos não são contados novamente na linha final.
+
+### Resumo dos relatórios por severidade
+
+Os totais abaixo reproduzem os sumários dos relatórios de auditoria; são um índice documental e não alteram findings, dispositions ou evidências históricas.
+
+| Projeto | CRITICAL | HIGH | MEDIUM | LOW | Contexto |
+|---|---:|---:|---:|---:|---|
+| 1 — `code-smells-project` | 3 | 5 | 5 | 3 | Auditoria que originou a matriz final de 16 findings. |
+| 2 — `ecommerce-api-legacy` | 2 | 4 | 2 | 2 | Auditoria histórica; a reavaliação final registra 0 CRITICAL, 1 HIGH, 2 MEDIUM e 2 LOW. |
+| 3 — `task-manager-api` | 1 | 6 | 3 | 1 | Auditoria final de 11 findings. |
 
 ### Projeto 1 — e-commerce Python/Flask
 
